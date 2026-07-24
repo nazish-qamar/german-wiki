@@ -67,8 +67,14 @@ def load_all_nodes(nodes_dir: Path | str | None = None) -> list[Node]:
     return sorted(nodes, key=lambda n: n.id)
 
 
-def node_to_frontmatter(node: Node, *, vocab_dir: Path | str | None = None) -> dict:
-    """Build the ordered frontmatter mapping for ``node`` (absent fields omitted)."""
+def node_to_frontmatter(
+    node: Node, *, vocab_dir: Path | str | None = None, learn: bool = False
+) -> dict:
+    """Build the ordered frontmatter mapping for ``node`` (absent fields omitted).
+
+    Tag values are always normalized (strip/lower/alias). ``learn`` controls
+    whether an unknown value is *appended* to the known-set — see ``write_node``.
+    """
     meta: dict = {}
     meta["id"] = node.id
     meta["title_de"] = node.title_de
@@ -80,11 +86,15 @@ def node_to_frontmatter(node: Node, *, vocab_dir: Path | str | None = None) -> d
         meta["cefr_basis"] = node.cefr_basis
 
     meta["register"] = [
-        n for r in node.register if (n := vocab.normalize("register", r, vocab_dir=vocab_dir))
+        n
+        for r in node.register
+        if (n := vocab.normalize("register", r, learn=learn, vocab_dir=vocab_dir))
     ]
     if node.themes is not None:
         meta["themes"] = [
-            n for t in node.themes if (n := vocab.normalize("themes", t, vocab_dir=vocab_dir))
+            n
+            for t in node.themes
+            if (n := vocab.normalize("themes", t, learn=learn, vocab_dir=vocab_dir))
         ]
 
     if node.separable is not None:
@@ -122,9 +132,9 @@ def node_to_frontmatter(node: Node, *, vocab_dir: Path | str | None = None) -> d
     return ordered
 
 
-def dumps_node(node: Node, *, vocab_dir: Path | str | None = None) -> str:
+def dumps_node(node: Node, *, vocab_dir: Path | str | None = None, learn: bool = False) -> str:
     """Serialize ``node`` to the full Markdown-with-frontmatter string."""
-    meta = node_to_frontmatter(node, vocab_dir=vocab_dir)
+    meta = node_to_frontmatter(node, vocab_dir=vocab_dir, learn=learn)
     post = frontmatter.Post(node.body_md, **meta)
     text = frontmatter.dumps(
         post,
@@ -136,8 +146,22 @@ def dumps_node(node: Node, *, vocab_dir: Path | str | None = None) -> str:
     return text.rstrip("\n") + "\n"
 
 
-def write_node(node: Node, path: Path | str, *, vocab_dir: Path | str | None = None) -> None:
-    """Write ``node`` to ``path`` (LF line endings, UTF-8)."""
+def write_node(
+    node: Node,
+    path: Path | str,
+    *,
+    vocab_dir: Path | str | None = None,
+    learn: bool = False,
+) -> None:
+    """Write ``node`` to ``path`` (LF line endings, UTF-8).
+
+    Tag values are always normalized. ``learn=False`` (the default) means a value
+    outside the known-set is normalized but NOT appended — an ordinary re-save
+    never mutates the vocab store. Only the ingest boundary (the reviewed pipeline
+    admitting genuinely new material) passes ``learn=True`` to grow the known-sets.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(dumps_node(node, vocab_dir=vocab_dir), encoding="utf-8", newline="\n")
+    path.write_text(
+        dumps_node(node, vocab_dir=vocab_dir, learn=learn), encoding="utf-8", newline="\n"
+    )

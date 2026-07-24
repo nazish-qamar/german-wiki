@@ -86,3 +86,41 @@ Node count is a dial, and the right end of it is "fewer, richer."
 
 **Guardrail:** max 5–8 candidate nodes extracted per source. Exceeding it signals the
 extractor is atomizing rather than conceptualizing.
+
+---
+
+## ADR-007 — Register/theme tags are open, normalized vocabularies (not enums)
+
+**Decided:** The two clustering axes — `register` and `themes` (SPEC §6) — are open
+`list[str]`, not enums. Every tag value passes through one normalizer (strip →
+lowercase → alias-map from `vocab/aliases.yaml`) before it is stored. The canonical
+known-sets live in git-tracked text files, one tag per line: `vocab/registers.txt` and
+`vocab/themes.txt`. Aliases fold spelling/language variants onto a canonical tag and are
+human-curated — the pipeline reads `aliases.yaml` but never writes it.
+
+By contrast, `type` / `cefr` / `status` / `family_transparency` stay strict enums: small,
+stable, syllabus-fixed vocabularies where a typo should fail loudly.
+
+**Learning happens only at the ingest boundary, not on every write.** Normalization
+(strip/lower/alias) runs on every write, but *appending an unknown value to the known-set*
+is opt-in via `learn=True`, passed only by the reviewed pipeline as it admits genuinely
+new material. An ordinary re-save or a merge round-trip (`write_node` default `learn=False`)
+normalizes tags but never grows the vocabulary — so the known-sets only ever expand through
+the same human-approved gate as `/nodes` writes (ADR-003), never as a silent side effect of
+touching an existing node. When learning does fire, the new tag is appended (append-only, no
+re-sort) and a warning is logged to `logs/gw.log`; it never raises.
+
+**Why:** These axes are *discovered from material* and unbounded by design — new domains
+(`arzt`, `amt`, `café`, …) appear as ingestion proceeds, and §6.2 expands register into
+several sub-dimensions later. A closed enum would reject real data and force constant model
+edits. Normalizing-and-warning keeps tags consistent (no `Küche`/`kueche`/` kitchen ` drift)
+while staying open. Gating *growth* of the vocabulary to the ingest boundary keeps the
+known-sets an auditable, reviewed artifact rather than accumulating typos from every write.
+
+**Rejected:**
+- *Enum-validating register/themes* — catches typos but fights the "discover from material"
+  goal and needs a code change for every new tag.
+- *Free-text tags with no normalization* — no store to append to, but `Küche` vs `küche` vs
+  `kitchen` fragments the very clusters the axes exist to create.
+- *Learning on every write* — simpler, but any round-trip of a node with a stray tag would
+  silently enshrine it in the vocabulary, defeating the audit trail.
