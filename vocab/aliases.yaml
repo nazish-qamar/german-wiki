@@ -1,0 +1,14 @@
+# Human-curated alias -> canonical tag maps, per field.
+#
+# The pipeline READS this file but never writes it (unknown tags are appended to
+# the known-set text files instead). Keys and values are matched case-insensitively
+# (compared lowercased). Add an entry here to fold a spelling/language variant onto
+# a canonical tag before it reaches the known-set.
+themes:
+  kitchen: küche
+  office: büro
+  bathroom: bad
+register:
+  umgangssprache: umgangssprachlich
+  informell: umgangssprachlich
+  schriftsprache: schriftlich
