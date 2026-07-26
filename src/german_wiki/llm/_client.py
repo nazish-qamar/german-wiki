@@ -77,6 +77,11 @@ class ModelResponse(BaseModel):
     saved_usd: float  # what a hit avoided; 0.0 on a miss
     cache_key: str
     finish_reason: str | None = None
+    # Provider-specific reasoning trace (GLM/DeepSeek return it; absence is normal).
+    # Capture-only: never parsed, never in the cache key, never written to /nodes or
+    # /raw. It exists so a truncated or garbage response is inspectable -- see
+    # `finish_reason == "length"`, which slice 3's extraction treats as a failure.
+    reasoning_content: str | None = None
 
 
 # --- client construction ---
@@ -139,11 +144,22 @@ def _usage_of(response: Any) -> Usage:
     )
 
 
-def _text_of(response: Any) -> tuple[str, str | None]:
+def _text_of(response: Any) -> tuple[str, str | None, str | None]:
+    """Return ``(content, finish_reason, reasoning_content)``.
+
+    ``reasoning_content`` is non-standard -- GLM and DeepSeek return it, others do
+    not -- so its absence is normal, not an error. It is captured for debugging
+    only: nothing here or downstream parses it or branches on its value.
+    """
     choices = getattr(response, "choices", None) or []
     if not choices:
-        return "", None
-    return getattr(choices[0].message, "content", None) or "", choices[0].finish_reason
+        return "", None, None
+    message = choices[0].message
+    return (
+        getattr(message, "content", None) or "",
+        choices[0].finish_reason,
+        getattr(message, "reasoning_content", None) or None,
+    )
 
 
 # --- the public call ---
@@ -247,6 +263,10 @@ def complete(
                 saved_usd=hit.get("cost_usd") or 0.0,
                 cache_key=key,
                 finish_reason=hit.get("finish_reason"),
+                # Read back from the payload so a re-run of a truncated call can
+                # still show WHY it truncated. Entries written before this field
+                # existed simply read back as None.
+                reasoning_content=hit.get("reasoning_content"),
             )
 
     if client is None:
@@ -280,7 +300,7 @@ def complete(
         raise
     latency_ms = int((time.perf_counter() - started) * 1000)
 
-    text, finish_reason = _text_of(response)
+    text, finish_reason, reasoning_content = _text_of(response)
     usage = _usage_of(response)
     warn_if_unpriced(resolved.provider, resolved.model, resolved.pricing)
     cost_usd = estimate_cost(resolved.pricing, usage)
@@ -297,6 +317,10 @@ def complete(
                 "request": material,
                 "text": text,
                 "finish_reason": finish_reason,
+                # In the payload but NOT in the key (see key_material): storing it
+                # keeps a cached truncated call inspectable on re-run, while the
+                # key stays exactly what it was before this field existed.
+                "reasoning_content": reasoning_content,
                 "response_id": getattr(response, "id", None),
                 "usage": usage.model_dump(),
                 "cost_usd": cost_usd,
@@ -323,4 +347,5 @@ def complete(
         saved_usd=0.0,
         cache_key=key,
         finish_reason=finish_reason,
+        reasoning_content=reasoning_content,
     )

@@ -18,7 +18,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import config, index, llm, vocab
+from . import config, index, ingest, llm, vocab
 from .db import connect
 
 app = typer.Typer(add_completion=False, help="German Wiki — node layer CLI.")
@@ -216,6 +216,150 @@ def cache_clear(
 
     removed = llm.cache_clear(cache_dir=cache_dir, older_than_days=older_than_days)
     console.print(f"Removed [bold]{removed}[/] cache entry(ies) from [dim]{cache_dir}[/]")
+
+
+@app.command("ingest")
+def ingest_text(  # named to avoid shadowing the `ingest` package imported above
+    file: Path = typer.Option(..., "--file", "-f", help="Plain-text source to ingest."),
+    force: bool = typer.Option(False, "--force", help="Re-ingest even if already in /raw."),
+    raw_dir: Path = typer.Option(config.RAW_DIR, "--raw-dir", help="Immutable raw store."),
+    queue_dir: Path = typer.Option(config.QUEUE_DIR, "--queue-dir", help="Review queue."),
+    nodes_dir: Path = typer.Option(
+        config.NODES_DIR, "--nodes-dir", help="Node dir (read-only here; for id collisions)."
+    ),
+    vocab_dir: Path = typer.Option(config.VOCAB_DIR, "--vocab-dir", help="Tag vocabulary."),
+) -> None:
+    """Extract concepts from a text file into the review queue. Writes NOTHING to /nodes."""
+    if not Path(file).is_file():
+        err_console.print(f"[red]No such file:[/] {file}")
+        raise typer.Exit(code=1)
+
+    try:
+        result = ingest.ingest_file(
+            file,
+            force=force,
+            raw_dir=raw_dir,
+            queue_dir=queue_dir,
+            nodes_dir=nodes_dir,
+            vocab_dir=vocab_dir,
+        )
+    except ingest.ExtractionError as exc:
+        err_console.print(f"[red]Extraction failed:[/] {exc}")
+        if exc.reasoning_content:
+            excerpt = exc.reasoning_content.strip().replace("\n", " ")[:300]
+            err_console.print(f"[dim]Model reasoning began: {excerpt}…[/]")
+        raise typer.Exit(code=1) from None
+    except ValueError as exc:
+        err_console.print(f"[red]{exc}[/]")
+        raise typer.Exit(code=1) from None
+
+    if result.already_ingested:
+        console.print(
+            f"Already ingested as [bold]{result.source_id}[/] "
+            f"({len(result.queue_paths)} still queued). Use [bold]--force[/] to re-run."
+        )
+        return
+
+    if not result.nodes:
+        console.print(
+            f"[yellow]No candidates extracted[/] from {file}. Raw kept at [dim]{result.raw_path}[/]"
+        )
+        return
+
+    table = Table(show_lines=False)
+    for col in ("node id", "type", "cefr", "title_de", "title_en", "conf"):
+        table.add_column(col)
+    for node in result.nodes:
+        table.add_row(
+            node.id,
+            node.type,
+            node.cefr,
+            node.title_de,
+            node.title_en,
+            f"{node.confidence:.2f}" if node.confidence is not None else "—",
+        )
+    console.print(table)
+
+    queued = ingest.list_queue(queue_dir=queue_dir)
+    console.print(
+        f"[dim]raw -> {result.raw_path}[/]\n"
+        f"[bold]{len(result.nodes)}[/] candidate(s) -> "
+        f"[dim]{queue_dir / result.source_id}[/]"
+    )
+    # ADR-003: say plainly that nothing landed in /nodes, and name the gate.
+    console.print(
+        "[dim]Nothing written to /nodes.[/] Review the files above, delete any you "
+        f"reject, then run [bold]gw promote {result.source_id}[/]"
+    )
+    if result.cached:
+        console.print("[dim]served from cache — no tokens spent[/]")
+    if len(queued) > 1:
+        console.print(f"[dim]{len(queued)} source(s) now pending — see [bold]gw queue[/][/]")
+
+
+@app.command()
+def queue(
+    queue_dir: Path = typer.Option(config.QUEUE_DIR, "--queue-dir", help="Review queue."),
+) -> None:
+    """Show ingested candidates awaiting review."""
+    pending = ingest.list_queue(queue_dir=queue_dir)
+    if not pending:
+        console.print(f"Queue is empty [dim]({queue_dir})[/]")
+        return
+
+    table = Table(show_lines=False)
+    for col in ("source id", "candidates", "node ids"):
+        table.add_column(col)
+    for source_id, paths in pending.items():
+        ids = ", ".join(p.stem for p in paths)
+        table.add_row(source_id, str(len(paths)), ids if len(ids) < 90 else ids[:87] + "…")
+    console.print(table)
+    console.print(
+        f"[dim]{sum(len(p) for p in pending.values())} candidate(s) in "
+        f"{len(pending)} source(s). Promote one with [bold]gw promote <source id>[/][/]"
+    )
+
+
+@app.command()
+def promote(
+    source_id: str = typer.Argument(..., help="Source id from `gw queue`."),
+    queue_dir: Path = typer.Option(config.QUEUE_DIR, "--queue-dir", help="Review queue."),
+    nodes_dir: Path = typer.Option(config.NODES_DIR, "--nodes-dir", help="Node directory."),
+    vocab_dir: Path = typer.Option(config.VOCAB_DIR, "--vocab-dir", help="Tag vocabulary."),
+    db: Path = typer.Option(config.DB_PATH, "--db", help="SQLite index path."),
+) -> None:
+    """Write a source's reviewed candidates into /nodes. The only command that does."""
+    try:
+        result = ingest.promote_source(
+            source_id,
+            queue_dir=queue_dir,
+            nodes_dir=nodes_dir,
+            vocab_dir=vocab_dir,
+            db_path=db,
+        )
+    except ValueError as exc:
+        err_console.print(f"[red]{exc}[/]")
+        raise typer.Exit(code=1) from None
+
+    if result.promoted:
+        console.print(
+            f"Promoted [bold]{len(result.promoted)}[/] node(s) -> [dim]{nodes_dir}[/]\n"
+            f"[dim]{', '.join(result.promoted)}[/]"
+        )
+    for tag_field, tags in result.learned_tags.items():
+        # ADR-007: the vocabulary grew, and it happened at the approved gate.
+        console.print(f"[dim]learned {tag_field}: {', '.join(tags)}[/]")
+    if result.reindexed:
+        console.print(f"[dim]reindexed {result.reindexed['nodes']} node(s)[/]")
+
+    for refusal in result.refused:
+        err_console.print(f"[yellow]Refused[/] {refusal.node_id}: {refusal.reason}")
+    if result.refused:
+        err_console.print(
+            f"[dim]{len(result.refused)} candidate(s) left in the queue. "
+            "Nothing was overwritten.[/]"
+        )
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

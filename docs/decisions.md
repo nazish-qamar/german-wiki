@@ -181,3 +181,74 @@ and greps for boundary violations.
 - *A persisted cost counter* — drift plus a repair path, for a sum that takes milliseconds.
 - *Guessing prices for paid models* — a wrong rate is worse than a visible gap.
 - *Enforcing "embeddings are local" by convention* — ADR-004 deserves a check that fires.
+
+---
+
+## ADR-009 — Ingestion stages into `/queue`; `gw promote` is the only writer to `/nodes`
+
+**Decided:** `gw ingest` writes complete node files to `queue/<source_id>/<node_id>.md` and
+never touches `/nodes`. `gw promote <source_id>` is the sole path into `/nodes`. Manual
+review sits between them this slice; rejecting a candidate is deleting its queue file.
+
+**Why:** SPEC §11 calls slice 3 "new nodes", but ADR-003 and CLAUDE.md say nothing
+auto-writes to `/nodes`, and the review CLI is slice 5. Extraction assigns `type`, `cefr`,
+`register` and `themes` — precisely the classifications ADR-003 gates. The queue satisfies
+both: material flows end-to-end now, and the approval gate exists two slices before the
+machinery that will automate it. Slice 5 wraps *this seam* with LangGraph `interrupt()`;
+it does not replace it.
+
+**Queued files are real nodes, not an intermediate format.** Each loads through
+`storage.load_node` unchanged, so review needs nothing but an editor, and promote gets
+validation for free.
+
+**`/queue` is gitignored.** Candidates live there minutes to hours between ingest and
+promote-or-reject. Tracking them would make every ingest a batch of adds and every promote a
+batch of deletes — churn that records no meaningful history, since a rejected candidate is
+one you decided *not* to keep. The promoted nodes in `/nodes` are the diffable record, which
+is the whole point of the gate; `/raw` is the durable provenance behind them.
+
+**Promote is not a file move.** It loads (validating any hand-edit made during review),
+writes via `write_node(..., learn=True)`, unlinks the queue entry on success, then
+reindexes. That `learn=True` is **the only one in the codebase** — ADR-007 says the tag
+known-sets grow through the same human-approved gate as `/nodes` writes, and this is that
+gate. Ingestion stages with `learn=False`. An AST-based test asserts the uniqueness, so a
+second learner cannot appear unnoticed.
+
+**Nothing is ever overwritten.** A node id colliding with `/nodes` or `/queue` gets a
+numeric suffix at ingest; at promote, an id that already exists in `/nodes` is refused and
+left queued. Refusals are per-file, so one bad candidate never blocks the rest. There is no
+dedup at all in this slice (SPEC §11) — two sources describing the same concept produce two
+nodes, and slice 4 is what detects that.
+
+**Source ids are `<YYYYMMDD>-<slug>-<content hash prefix>`.** Hashing the *content*, not the
+filename, makes re-ingesting the same text detectable. `/raw` holds two files per source:
+`<id>.txt` byte-verbatim and immutable (written *before* extraction, so provenance never
+depends on the model succeeding) and `<id>.json` for metadata. The sidecar's
+**`content_sha256` is stored full-length** — the filename's short prefix is a human handle,
+this is slice 5's tier-1 exact-duplicate key (SPEC §3.1), and backfilling it later would
+mean re-reading every raw file. A short-prefix collision widens the prefix rather than
+overwriting, compared against stored bytes so it works even when a prior ingest left no
+sidecar.
+
+**`finish_reason == "length"` is a failed extraction, not an empty result.** GLM-4.5 spends
+completion tokens on reasoning before emitting content, so a tight cap returns well-formed
+*empty* output. `complete()` is parse-free by design, so extraction owns the check; the
+error carries `reasoning_content` so the truncation is inspectable. That field is
+capture-only: never parsed, never in the cache key, never written to `/nodes` or `/raw` —
+but it *is* in the cache payload, because a truncated call is itself cached and a re-run
+would otherwise report the failure with an empty context.
+
+**Every machine-assigned CEFR level is marked `cefr_basis: llm:extraction…`.** `Node.cefr`
+is required and SPEC §5 says zero-shot LLM CEFR is unreliable, so the level is provisional
+by construction. The marker makes `grep` find every one when slice 6 lands the wordlist and
+grammar anchors.
+
+**Rejected:**
+- *Writing straight to `/nodes` with git revert as the safety net* — fast, but sets aside a
+  rule CLAUDE.md marks non-negotiable for two slices.
+- *A summary-only preview with a `--write` flag* — approving a table is not approving the
+  content; the queue lets you read the actual file.
+- *`shutil.move` on promote* — skips validation, and leaves ADR-007's vocabulary growth with
+  no gate to fire at.
+- *Failing an extraction that exceeds the 5–8 cap* — ADR-006 treats the overage as a signal
+  the extractor is atomizing; warn and keep the first 8 rather than discard the source.

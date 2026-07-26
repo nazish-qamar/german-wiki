@@ -14,3 +14,6 @@ logs/*
 !logs/llm_usage.jsonl
 data/*.db
 .cache/
+# Staging for ingested candidates awaiting `gw promote` (ADR-003). Not a durable
+# artifact -- /raw and /nodes are the tracked record.
+queue/

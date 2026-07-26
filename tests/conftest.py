@@ -38,7 +38,7 @@ def seed_paths(nodes_dir: Path) -> dict[str, Path]:
 
 
 @pytest.fixture
-def seed_nodes(seed_paths: dict[str, Path]) -> dict[str, "storage.Node"]:
+def seed_nodes(seed_paths: dict[str, Path]) -> dict[str, storage.Node]:
     return {sid: storage.load_node(p) for sid, p in seed_paths.items()}
 
 
@@ -108,9 +108,11 @@ class FakeChatClient:
         completion_tokens: int = 10,
         cached_tokens: int = 0,
         finish_reason: str = "stop",
+        reasoning_content: str | None = None,
         error: Exception | None = None,
     ) -> None:
         self._texts = [text] if isinstance(text, str) else list(text)
+        self._reasoning_content = reasoning_content
         self._prompt_tokens = prompt_tokens
         self._completion_tokens = completion_tokens
         self._cached_tokens = cached_tokens
@@ -128,6 +130,14 @@ class FakeChatClient:
         if self.error is not None:
             raise self.error
         index = min(len(self.calls) - 1, len(self._texts) - 1)
+        # reasoning_content is a provider extension, not an SDK field; the SDK
+        # models allow extras, so omitting it reproduces a provider that never
+        # sends one (attribute reads back as None).
+        extra = (
+            {"reasoning_content": self._reasoning_content}
+            if self._reasoning_content is not None
+            else {}
+        )
         return ChatCompletion(
             id=f"chatcmpl-fake-{len(self.calls)}",
             created=0,
@@ -137,7 +147,9 @@ class FakeChatClient:
                 Choice(
                     index=0,
                     finish_reason=self._finish_reason,
-                    message=ChatCompletionMessage(role="assistant", content=self._texts[index]),
+                    message=ChatCompletionMessage(
+                        role="assistant", content=self._texts[index], **extra
+                    ),
                 )
             ],
             usage=CompletionUsage(
@@ -152,3 +164,18 @@ class FakeChatClient:
 @pytest.fixture
 def fake_client() -> FakeChatClient:
     return FakeChatClient()
+
+
+# --- slice 3: ingestion ---
+
+
+@pytest.fixture
+def tmp_raw(tmp_path: Path) -> Path:
+    """A throwaway /raw; the repo's tracked raw/ is never written by tests."""
+    return tmp_path / "raw"
+
+
+@pytest.fixture
+def tmp_queue(tmp_path: Path) -> Path:
+    """A throwaway /queue."""
+    return tmp_path / "queue"

@@ -1,0 +1,10 @@
+{
+  "source_id": "20260726-test-buero-90458c3d",
+  "original_path": "test-büro.txt",
+  "content_sha256": "90458c3d622852f3955cc99a83bc715f14f8ddbf25a050e3dd3f042693b4cdf5",
+  "ingested_at": "2026-07-26T17:44:03.294251+00:00",
+  "chars": 938,
+  "model": "glm-4.5-flash",
+  "provider": "zai",
+  "candidate_count": 2
+}
