@@ -124,3 +124,60 @@ known-sets an auditable, reviewed artifact rather than accumulating typos from e
   `kitchen` fragments the very clusters the axes exist to create.
 - *Learning on every write* — simpler, but any round-trip of a node with a stray tag would
   silently enshrine it in the vocabulary, defeating the audit trail.
+
+---
+
+## ADR-008 — Model layer: cache key, step gating, and cost accounting
+
+**Decided:** Slice 2's model layer (`german_wiki.llm`) resolves provider+model per pipeline
+step from `config/models.yaml`, wraps every call in a content-hash disk cache, and appends
+one JSONL record per call. Six decisions inside that are worth not re-litigating:
+
+**1. The cache key excludes the pipeline step.** It covers the request as the provider sees
+it — provider, model, messages, temperature, max_tokens, response_format, seed — plus a
+`prompt_version` escape hatch and a key-schema version `v`. Two steps issuing a
+byte-identical request *should* share an entry (ADR-005 says never re-call on identical
+input), and renaming a step must not cost money. The step is stored in the entry for
+debugging, just not hashed. Credentials, base URL, timeouts and retry counts are excluded
+for the same reason: they don't change the response.
+
+**2. Steps carry `status: active | planned`.** The config documents the whole SPEC §9
+routing plan, but only `active` steps resolve — routing to a `planned` one raises. This
+lets a later slice's config sit in the repo, reviewed and visible, without being reachable.
+`status` defaults to `planned`, so a step becomes callable only by opting in.
+
+**3. `kind: api | local` on providers is ADR-004's enforcement mechanism.** `embeddings`
+is `provider: local` from day one, and `complete()` refuses any step whose provider kind
+isn't `api`. That check lives at the call site, not in resolution, and is independent of
+`status` — so activating embeddings in slice 4 still cannot turn it into an API call.
+Tested against an *active* local step, since a planned one would trip the earlier gate and
+leave the guard unexercised.
+
+**4. Unpriced models are never estimated.** Only known-free models carry a rate
+(`glm-4.5-flash` at explicit zeros, so "known free" stays distinguishable from "unknown").
+A model absent from the table logs its token counts and `cost_usd: null`, plus one warning
+per `(provider, model)`. A hardcoded per-1M figure goes stale silently and corrupts the
+running total; an honest gap does not. Rates are config, so enabling a paid model is a YAML
+edit.
+
+**5. The running total is derived by summing `logs/llm_usage.jsonl`, which is git-tracked.**
+A persisted counter would be a second source of truth that drifts and needs a repair path,
+and it could not live in `data/index.db` — `rebuild_schema` drops every table on each
+`gw reindex`, silently zeroing it. The ledger is tracked because spend history is a durable
+record; it is append-only, so diffs are pure additions. `logs/gw.log` stays ignored, which
+is why `.gitignore` uses `logs/*` plus a negation rather than `logs/`.
+
+**6. No automatic provider failover yet.** Swapping is manual: a config edit, `provider=`,
+`fallback=True`, or `GW_LLM_PROVIDER`. Auto-failover raises questions — does the failover
+call share a cache key, does it double-log, what counts as fatal — better answered against
+a real failure than guessed at now.
+
+**Also:** `llm/__init__.py` is the only import surface; internals are `_`-prefixed and the
+rest of the app, `cli.py` included, imports only the public names. A test asserts `__all__`
+and greps for boundary violations.
+
+**Rejected:**
+- *Hashing the step into the cache key* — would make a rename cost real money for no gain.
+- *A persisted cost counter* — drift plus a repair path, for a sum that takes milliseconds.
+- *Guessing prices for paid models* — a wrong rate is worse than a visible gap.
+- *Enforcing "embeddings are local" by convention* — ADR-004 deserves a check that fires.

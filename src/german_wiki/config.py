@@ -33,3 +33,10 @@ DATA_DIR = _path_env("GW_DATA_DIR", PROJECT_ROOT / "data")
 DB_PATH = _path_env("GW_DB_PATH", DATA_DIR / "index.db")
 VOCAB_DIR = _path_env("GW_VOCAB_DIR", PROJECT_ROOT / "vocab")
 LOGS_DIR = _path_env("GW_LOGS_DIR", PROJECT_ROOT / "logs")
+
+# --- slice 2: model layer ---
+CACHE_DIR = _path_env("GW_CACHE_DIR", PROJECT_ROOT / ".cache")
+CONFIG_DIR = _path_env("GW_CONFIG_DIR", PROJECT_ROOT / "config")
+MODELS_CONFIG_PATH = _path_env("GW_MODELS_CONFIG", CONFIG_DIR / "models.yaml")
+DOTENV_PATH = _path_env("GW_DOTENV", PROJECT_ROOT / ".env")
+USAGE_LOG_PATH = _path_env("GW_USAGE_LOG", LOGS_DIR / "llm_usage.jsonl")

@@ -8,8 +8,13 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from openai.types import CompletionUsage
+from openai.types.chat import ChatCompletion, ChatCompletionMessage
+from openai.types.chat.chat_completion import Choice
+from openai.types.completion_usage import PromptTokensDetails
 
 from german_wiki import config, storage
 
@@ -60,3 +65,90 @@ def tmp_vocab(tmp_path: Path) -> Path:
 @pytest.fixture
 def tmp_db(tmp_path: Path) -> Path:
     return tmp_path / "index.db"
+
+
+# --- slice 2: model layer ---
+
+
+@pytest.fixture
+def models_config() -> Path:
+    """The real config/models.yaml (read-only in tests)."""
+    return config.MODELS_CONFIG_PATH
+
+
+@pytest.fixture
+def tmp_cache(tmp_path: Path) -> Path:
+    """A throwaway model-call cache; the repo's .cache/ is never touched."""
+    return tmp_path / "cache"
+
+
+@pytest.fixture
+def tmp_usage_log(tmp_path: Path) -> Path:
+    """A throwaway usage ledger; the tracked logs/llm_usage.jsonl is never touched."""
+    return tmp_path / "llm_usage.jsonl"
+
+
+class FakeChatClient:
+    """Stand-in for ``openai.OpenAI`` exposing only ``.chat.completions.create``.
+
+    It returns *real* openai SDK response types, so attribute access in
+    ``_client.py`` is exercised against the same shapes the live SDK produces.
+
+    ``calls`` records the kwargs of every request; ``call_count`` is how the
+    suite proves a cache hit issued zero requests, which is the load-bearing
+    assertion for ADR-005. Pass ``text`` as a list to return a different body per
+    call, which distinguishes a genuine hit from a coincidental re-fetch.
+    """
+
+    def __init__(
+        self,
+        *,
+        text: str | list[str] = "Antwort",
+        prompt_tokens: int = 100,
+        completion_tokens: int = 10,
+        cached_tokens: int = 0,
+        finish_reason: str = "stop",
+        error: Exception | None = None,
+    ) -> None:
+        self._texts = [text] if isinstance(text, str) else list(text)
+        self._prompt_tokens = prompt_tokens
+        self._completion_tokens = completion_tokens
+        self._cached_tokens = cached_tokens
+        self._finish_reason = finish_reason
+        self.error = error
+        self.calls: list[dict] = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    @property
+    def call_count(self) -> int:
+        return len(self.calls)
+
+    def _create(self, **kwargs) -> ChatCompletion:
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        index = min(len(self.calls) - 1, len(self._texts) - 1)
+        return ChatCompletion(
+            id=f"chatcmpl-fake-{len(self.calls)}",
+            created=0,
+            model=kwargs["model"],
+            object="chat.completion",
+            choices=[
+                Choice(
+                    index=0,
+                    finish_reason=self._finish_reason,
+                    message=ChatCompletionMessage(role="assistant", content=self._texts[index]),
+                )
+            ],
+            usage=CompletionUsage(
+                prompt_tokens=self._prompt_tokens,
+                completion_tokens=self._completion_tokens,
+                total_tokens=self._prompt_tokens + self._completion_tokens,
+                prompt_tokens_details=PromptTokensDetails(cached_tokens=self._cached_tokens),
+            ),
+        )
+
+
+@pytest.fixture
+def fake_client() -> FakeChatClient:
+    return FakeChatClient()

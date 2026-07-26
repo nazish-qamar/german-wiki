@@ -1,0 +1,78 @@
+# Per-pipeline-step model routing (SPEC §9, CLAUDE.md "Model / cost rules").
+#
+# Nothing secret lives here. API keys are read from .env via `api_key_env`.
+#
+# status: active   -> callable now.
+# status: planned  -> reserved. resolve_step() raises a clear error. Flip to
+#                     active in the slice that implements it; that is the only
+#                     change needed, no code edit.
+#
+# Provider + model are configured HERE, never hardcoded in a call site. A step
+# omits a field to inherit it from `defaults`.
+version: 1
+
+providers:
+  zai:
+    kind: api
+    base_url: https://api.z.ai/api/paas/v4
+    api_key_env: ZAI_API_KEY
+    timeout_s: 60
+    max_retries: 2
+  deepseek:
+    kind: api
+    base_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    timeout_s: 60
+    max_retries: 2
+  local:
+    kind: local # in-process sentence-transformers. ADR-004: never an API.
+
+# USD per 1M tokens. ONLY models with a KNOWN rate are listed, and right now
+# that means only the free tier. A model absent here is "unpriced": its tokens
+# are still logged from the API response, but cost is recorded as null and
+# warned once -- never a guessed dollar figure that silently goes stale.
+# Add a real rate here the day you enable a paid model.
+pricing:
+  zai:
+    glm-4.5-flash: { input: 0.0, cached_input: 0.0, output: 0.0 }
+  # SLICE 4 -- uncomment together with flipping `embeddings` to status: active.
+  # Local embeddings are free, but "free" and "unknown" must stay distinguishable:
+  # without an entry they log cost_usd: null and warn once, as if the rate were
+  # merely untracked. An explicit zero says known-free.
+  # local:
+  #   intfloat/multilingual-e5-small: { input: 0.0, output: 0.0 }
+
+defaults:
+  provider: zai
+  model: glm-4.5-flash
+  temperature: 0.0
+  max_tokens: 4096
+
+# NOTE on max_tokens: GLM-4.5 models reason before answering, and those internal
+# reasoning tokens count toward max_tokens. A cap that is too tight returns
+# finish_reason: "length" with EMPTY content -- the budget ran out mid-thought.
+# Budget for reasoning plus the answer, and treat finish_reason: "length" as a
+# failed call rather than an empty result.
+steps:
+  extraction: # SPEC §2, §9 -- candidate concepts from a source. Slice 3.
+    status: active
+    model: glm-4.5-flash
+    max_tokens: 4096
+
+  adjudication: # SPEC §3.1 tier 3 + §4.1 -- SAME|OVERLAP|DISTINCT, merge. Slice 5.
+    status: planned
+    model: glm-4.6
+    max_tokens: 2048
+    fallback: { provider: deepseek, model: deepseek-chat }
+
+  vision: # SPEC §9 -- image/PDF OCR. Slice 8.
+    status: planned
+    model: glm-4.5v
+    max_tokens: 8192
+
+  embeddings: # SPEC §9 + ADR-004 -- ALWAYS local, never an API. Slice 4.
+    # Flipping this to active also means uncommenting the `local` pricing block
+    # above, or local embeddings report as unpriced rather than known-free.
+    status: planned
+    provider: local
+    model: intfloat/multilingual-e5-small

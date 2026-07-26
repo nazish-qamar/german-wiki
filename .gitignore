@@ -8,6 +8,9 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .env
-logs/
+# logs/* rather than logs/: git cannot re-include a file whose parent directory
+# is excluded, and llm_usage.jsonl is the tracked cost ledger (SPEC §10).
+logs/*
+!logs/llm_usage.jsonl
 data/*.db
 .cache/

@@ -32,6 +32,11 @@ CLI-first. The review command is the only UI needed for the first several slices
   variable content LAST, to maximize provider cache hits.
 - Log token counts + estimated cost per call to /logs. Surface a running total.
 
+## Git
+- Do NOT run git commands (commit, add, push, checkout, branch, reset, etc.).
+  Stage and commit are mine. When a checkpoint is ready, tell me what to commit
+  and suggest a message; I run the git commands myself.
+
 ## How I work
 - Build in vertical slices. One feature working end-to-end before starting the next.
 - SHOW ME THE PLAN before writing code for any new module. Wait for my approval.

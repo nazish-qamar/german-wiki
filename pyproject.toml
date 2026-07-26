@@ -27,3 +27,4 @@ line-length = 100
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["live: hits a real model API; needs GW_LIVE_TESTS=1 and an API key"]
