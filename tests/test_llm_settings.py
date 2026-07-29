@@ -88,19 +88,25 @@ def test_shipped_active_steps_all_resolve(models_config: Path) -> None:
         assert resolved.provider in settings.providers
 
 
-def test_shipped_embeddings_is_local_and_planned(models_config: Path) -> None:
-    """ADR-004: embeddings are never an API step."""
+def test_shipped_embeddings_is_local_and_active(models_config: Path) -> None:
+    """ADR-004: embeddings are never an API step -- now a live guarantee, not a
+    hypothetical one, because the step is genuinely active since slice 4."""
     settings = _settings.load_settings(models_config)
     step = settings.steps["embeddings"]
+    assert step.status == "active"
     assert step.provider == "local"
     assert settings.providers["local"].kind == "local"
 
 
 def test_shipped_only_free_models_are_priced(models_config: Path) -> None:
-    """No guessed rates: a paid model must be absent, not estimated."""
+    """No guessed rates: a paid model must be absent, not estimated.
+
+    Local embeddings carry an explicit zero rather than being omitted, so
+    "known-free" stays distinguishable from "price unknown".
+    """
     settings = _settings.load_settings(models_config)
     priced = {model for models in settings.pricing.values() for model in models}
-    assert priced == {"glm-4.5-flash"}
+    assert priced == {"glm-4.5-flash", "intfloat/multilingual-e5-small"}
     for models in settings.pricing.values():
         for pricing in models.values():
             assert (pricing.input, pricing.output) == (0.0, 0.0)

@@ -1,11 +1,9 @@
 """SQLite (+ sqlite-vec) connection and schema for the DERIVED index.
 
 This DB is never authoritative — it is rebuilt from ``/nodes`` by ``reindex``.
-The sqlite-vec extension is loaded on every connection (verified working), but no
-vector table is created in slice 1: the embedding table (``vec_nodes``, float[384]
-for multilingual-e5-small) arrives in slice 4. The schema is expressed as an
-ordered list of named DDL statements so that slice 4 adds ``vec_nodes`` as one
-more entry rather than editing existing DDL.
+The sqlite-vec extension is loaded on every connection, and slice 4 adds the
+embedding table ``vec_nodes`` as one more entry in ``SCHEMA`` rather than editing
+existing DDL, exactly as slice 1 set it up to.
 """
 
 from __future__ import annotations
@@ -17,8 +15,18 @@ import sqlite_vec
 
 from . import config
 
+# Width of one embedding vector: multilingual-e5-small emits 384 dimensions.
+#
+# It is pinned HERE, next to the DDL that consumes it, because a vec0 table needs
+# its width at CREATE time -- not in models.yaml, whose StepSettings/ResolvedStep
+# are both extra="forbid" and describe routing, not storage layout.
+# ``embed/_model.py`` asserts the loaded model actually reports this many
+# dimensions, so swapping the model fails loudly at load rather than writing
+# wrong-width vectors that sqlite-vec might reject noisily or accept quietly.
+EMBEDDING_DIM = 384
+
 # (table_name, create_sql). rebuild_schema drops each table (reverse order) then
-# creates them (forward order). Slice 4 appends a ("vec_nodes", <vec0 DDL>) entry.
+# creates them (forward order).
 SCHEMA: list[tuple[str, str]] = [
     (
         "nodes",
@@ -72,6 +80,21 @@ SCHEMA: list[tuple[str, str]] = [
         CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
+        )
+        """,
+    ),
+    (
+        # Vectors are stored normalized, so cosine distance is directly meaningful
+        # and similarity is simply ``1 - distance`` (see embed/_store.py).
+        #
+        # DROP TABLE removes vec0's five shadow tables (vec_nodes_chunks, _info,
+        # _rowids, _vector_chunks00) along with it, so rebuild_schema's existing
+        # drop/create loop needs no special handling. Verified on sqlite-vec 0.1.9.
+        "vec_nodes",
+        f"""
+        CREATE VIRTUAL TABLE vec_nodes USING vec0(
+            node_id   TEXT PRIMARY KEY,
+            embedding float[{EMBEDDING_DIM}] distance_metric=cosine
         )
         """,
     ),

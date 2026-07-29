@@ -19,10 +19,17 @@ from .db import connect, rebuild_schema
 from .storage import load_node
 
 REINDEXED_AT_KEY = "reindexed_at"
+EMBEDDING_MODEL_KEY = "embedding_model"
+EMBEDDING_DIM_KEY = "embedding_dim"
 
 
 def _json_or_none(value) -> str | None:
     return None if value is None else json.dumps(value, ensure_ascii=False)
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """Upsert one key in the generic ``meta`` table."""
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)", (key, value))
 
 
 def reindex(
@@ -71,8 +78,7 @@ def reindex(
             n_nodes += 1
             for link in node.links:
                 conn.execute(
-                    "INSERT INTO links (source_id, target, relation, confidence) "
-                    "VALUES (?,?,?,?)",
+                    "INSERT INTO links (source_id, target, relation, confidence) VALUES (?,?,?,?)",
                     (node.id, link.target, link.relation, link.confidence),
                 )
                 n_links += 1
@@ -83,10 +89,7 @@ def reindex(
                 )
                 n_themes += 1
 
-        conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)",
-            (REINDEXED_AT_KEY, repr(time.time())),
-        )
+        set_meta(conn, REINDEXED_AT_KEY, repr(time.time()))
         conn.commit()
         return {"nodes": n_nodes, "links": n_links, "themes": n_themes}
     finally:

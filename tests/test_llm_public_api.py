@@ -13,6 +13,11 @@ EXPECTED = {
     "ChatClient",
     "ModelResponse",
     "Prompt",
+    # Public since slice 4: a LOCAL runner (the embedder) needs its configured
+    # model id, and complete() refuses kind=local by design (ADR-004). Resolution
+    # only reads config -- it never calls anything.
+    "ResolvedStep",
+    "resolve_step",
     "ShotPair",
     "Usage",
     "cache_clear",

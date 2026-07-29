@@ -35,12 +35,11 @@ providers:
 pricing:
   zai:
     glm-4.5-flash: { input: 0.0, cached_input: 0.0, output: 0.0 }
-  # SLICE 4 -- uncomment together with flipping `embeddings` to status: active.
   # Local embeddings are free, but "free" and "unknown" must stay distinguishable:
-  # without an entry they log cost_usd: null and warn once, as if the rate were
-  # merely untracked. An explicit zero says known-free.
-  # local:
-  #   intfloat/multilingual-e5-small: { input: 0.0, output: 0.0 }
+  # without an entry they would report as unpriced, as if the rate were merely
+  # untracked. An explicit zero says known-free.
+  local:
+    intfloat/multilingual-e5-small: { input: 0.0, output: 0.0 }
 
 defaults:
   provider: zai
@@ -71,8 +70,13 @@ steps:
     max_tokens: 8192
 
   embeddings: # SPEC §9 + ADR-004 -- ALWAYS local, never an API. Slice 4.
-    # Flipping this to active also means uncommenting the `local` pricing block
-    # above, or local embeddings report as unpriced rather than known-free.
-    status: planned
+    # Active since slice 4, together with the `local` pricing entry above.
+    # complete() still refuses this step: kind=local can never be an HTTP call,
+    # checked independently of status. The local runner lives in german_wiki.embed.
+    #
+    # The vector WIDTH is not configured here -- db.EMBEDDING_DIM pins it, because
+    # the vec0 column needs it at CREATE time. Changing this model means changing
+    # that constant and running `gw reindex && gw embed`.
+    status: active
     provider: local
     model: intfloat/multilingual-e5-small

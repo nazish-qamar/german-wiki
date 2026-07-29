@@ -136,9 +136,10 @@ def test_cost_since_filters(tmp_usage_log: Path) -> None:
 
 
 def test_cache_stats_on_an_empty_cache(tmp_cache: Path) -> None:
+    """Plural since slice 4: the command covers the LLM and embedding caches."""
     result = runner.invoke(app, ["cache", "stats", "--cache-dir", str(tmp_cache)], env=WIDE)
     assert result.exit_code == 0
-    assert "Cache is empty" in result.stdout
+    assert "Caches are empty" in result.stdout
 
 
 def test_cache_stats_counts_entries(tmp_cache: Path) -> None:

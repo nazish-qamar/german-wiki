@@ -10,6 +10,11 @@ are re-exported here rather than reached into. Import from here::
 Slice 2 ships the plumbing only: routing config, prompt assembly, the disk cache
 (ADR-005) and token/cost accounting. Extraction prompts and response parsing
 belong to slice 3.
+
+``resolve_step`` is public so a **local** runner -- slice 4's embedder -- can read
+its configured model id without going through ``complete()``, which refuses any
+``kind: local`` provider by design (ADR-004). Resolution reads config; it never
+calls anything.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from ._cache import clear as _cache_clear
 from ._cache import stats as _cache_stats
 from ._client import JSON_OBJECT, ChatClient, ModelResponse, complete
 from ._prompt import Prompt, ShotPair
+from ._settings import ResolvedStep, resolve_step
 from ._usage import Usage
 from ._usage import totals as _totals
 
@@ -29,12 +35,14 @@ __all__ = [
     "ChatClient",
     "ModelResponse",
     "Prompt",
+    "ResolvedStep",
     "ShotPair",
     "Usage",
     "cache_clear",
     "cache_stats",
     "complete",
     "cost_totals",
+    "resolve_step",
 ]
 
 

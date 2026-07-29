@@ -32,6 +32,11 @@ CLI-first. The review command is the only UI needed for the first several slices
   variable content LAST, to maximize provider cache hits.
 - Log token counts + estimated cost per call to /logs. Surface a running total.
 
+## Testing
+- Tests that assert on source-code structure (calls, imports, keywords) parse the AST,
+  never string-match — docstrings and comments explain the rules being checked and will
+  false-positive under grep. (Learned twice: slices 3 and 4.)
+
 ## Git
 - Do NOT run git commands (commit, add, push, checkout, branch, reset, etc.).
   Stage and commit are mine. When a checkpoint is ready, tell me what to commit

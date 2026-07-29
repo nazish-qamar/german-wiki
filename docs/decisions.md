@@ -252,3 +252,172 @@ grammar anchors.
   no gate to fire at.
 - *Failing an extraction that exceeds the 5–8 cap* — ADR-006 treats the overage as a signal
   the extractor is atomizing; warn and keep the first 8 rather than discard the source.
+
+---
+
+## ADR-010 — Duplicate detection: exact Jaccard, cached vectors, report-only
+
+**Decided:** Slice 4 detects duplicates across three tiers and reports them. It writes
+nothing to `/nodes` or `/queue`; acting on a finding is slice 5.
+
+**Tier 1 is exact, NOT MinHash — a deliberate departure from SPEC §3.1's wording.**
+Exact duplicates are `sha256` of normalized text; near-exact is *true* Jaccard over 5-character
+shingles, with a length-ratio prefilter (`J(A,B) ≤ min/max`, so a size mismatch rules a pair
+out without touching the sets). MinHash exists to approximate Jaccard sublinearly at a scale
+SPEC §3.3 explicitly says this corpus will not reach — "low tens of thousands". At that size
+the real similarity is directly affordable, and computing it avoids LSH band/row tuning and
+approximation error in both directions.
+
+**This is recorded so the MinHash reference is not later "restored" as a perceived gap.**
+SPEC §3.1 still says MinHash; that line is over-specified for the actual scale. If the corpus
+ever grows past where the prefilter keeps the pair sweep comfortable, revisit — the prefilter
+is the seam an LSH stage would slot into.
+
+**Embeddings are cached on disk, keyed by (model, exact model input)** — ADR-005's principle
+applied to a local model. Local embeddings cost no money but cost time, and a full re-encode is
+the difference between `gw embed` being instant and being a coffee break. **The model name is
+in the key**, so two embedding models never collide and can be A/B'd against one corpus. The
+key covers the *exact* string sent to the model, `query: ` prefix included.
+
+**Cache and vector table are deliberately distinct.** The cache is recompute-avoidance and
+survives `gw reindex`; the sqlite-vec table is query structure and is dropped by it. That split
+is precisely what lets `gw reindex` repopulate vectors **without loading a model** — the
+run-freely property ADR-001 depends on. A fresh clone must not download 470MB to run `gw list`.
+
+**The governing principle, since it came up twice in one slice:** the cache key must contain
+everything that affects the vector. Two consequences fall out of that, and both were hit here:
+
+1. Changing *what* is embedded (`embed_text`) changes the key, so every cached vector is
+   orphaned. Happened during calibration; cost was one `gw cache clear --kind embeddings`.
+2. Changing *how* the vector is transformed after encoding has the same effect — which is why
+   mean-centering is expensive. The mean is **corpus-global**, so it would have to enter the
+   key, and then *every node addition* orphans the entire cache.
+
+The general rule: a transform depending only on a single node's own text keeps the key stable
+and the cache useful; a transform depending on the corpus makes the key corpus-dependent and
+the cache nearly worthless. **Prefer stateless-per-node transforms.** Worth checking against
+any future candidate — TF-IDF weighting, whitening, dimensionality reduction fitted on the
+corpus, and centroid subtraction all fall on the expensive side of that line.
+
+- `gw reindex` — rebuilds scalar tables, reloads cached vectors, **never computes**.
+- `gw embed` — explicit and heavy; reports "N new, M from cache", which is the embedding-layer
+  equivalent of slice 2's `call_count == 1` proof.
+- `gw dupes` — lazily embeds what is missing, so it never fails on a cold cache.
+
+**`EMBEDDING_DIM` is pinned in `db.py`, not in `models.yaml`.** A vec0 column needs its width
+at CREATE time, and `StepSettings`/`ResolvedStep` are both `extra="forbid"` and describe routing,
+not storage layout. `embed/_model.py` asserts the loaded model reports that width **at load,
+before any encode**, so a mismatched model can never produce a vector that reaches the column,
+where sqlite-vec might reject it loudly or accept it quietly.
+
+**The `query: ` prefix is mandatory.** multilingual-e5 requires `query: `/`passage: `, and its
+own guidance is `query: ` on both sides for symmetric similarity — which node-to-node comparison
+is. It is applied in `embed_text` rather than left to call sites.
+
+**Two normalizations, deliberately not shared.** Tier 1 lowercases aggressively because it asks
+"is this the same text?". Embedding preserves case because German capitalizes nouns and the
+model uses that signal.
+
+**The embedded text is the German title plus a de-scaffolded body — measured, not guessed.**
+SPEC §3.1's thresholds (0.75–0.92) do not survive contact with multilingual-e5, whose cosine
+scores compress into a narrow high band. The first implementation embedded
+`"{title_de} — {title_en}\n\n{body_md}"` and flagged **all six pairs of four unrelated seed
+nodes** at 0.86–0.90 — a 100% false-positive rate, which would have handed slice 5 an
+adjudication queue containing everything: exactly what §3.1's cheap tiers exist to prevent.
+
+Diagnosis: the margin between the weakest true duplicate (0.9137) and the strongest unrelated
+pair (0.8980) was 0.016, because the string was dominated by structure every node shares.
+Eight variants were measured against the seed corpus plus a real ingested pair
+(`um-hilfe-bitten` vs the queued `hoefliche-bitten-im-buero`), scoring
+`min(related) − max(unrelated)`:
+
+| variant | margin |
+|---|---|
+| German + English title, full raw body (original) | +0.0378 |
+| German title only, full raw body | +0.0298 |
+| German + English title, stripped body | +0.0480 |
+| **German title only, stripped body** | **+0.0559** |
+| German title only, stripped and truncated | +0.018 … +0.037 |
+| German title alone | +0.0175 |
+
+Two counter-intuitive results worth not rediscovering. Stripping Markdown — the `## Examples`
+heading, table pipes, `[alltag]` register tags — nearly doubles the margin, because otherwise
+the model spends capacity on scaffolding every node carries. And **appending the English title
+hurts**: the German-English pairing is itself a shared structure that pulls unrelated nodes
+together. Truncating hurts too; the body carries real signal, so all of it is kept.
+
+Consequence: the vector no longer contains `title_en`, so an English query matches less well.
+Correct here (dedup compares German node to German node); slice 9's RAG chat may want its own
+text builder.
+
+**Thresholds are calibrated to that measurement, not to SPEC's numbers**: `GRAY_LOW = 0.87`
+(above the 0.8635 unrelated ceiling), `GRAY_HIGH = 0.95` (above the 0.9194 weakest true
+duplicate, so genuine paraphrases reach the LLM rather than being decided by a constant), and
+`NEAR_EXACT_JACCARD = 0.85`. SPEC §3.3 calls the threshold the node-count dial; this is where
+that dial lives, in one edit. After the fix the four seeds report **zero** pairs, and the real
+ingested source reports three defensible ones with the true duplicate ranked top.
+
+The test asserts the *relationship* — `GRAY_LOW` above the measured unrelated ceiling and below
+the weakest duplicate — rather than a literal pair, so recalibrating on more material updates a
+comment instead of breaking a test. **Nine unrelated pairs is thin evidence; revisit once real
+material accumulates.** Changing `embed_text` changes the cache key, so stale vectors are
+simply never read again; `gw cache clear --kind embeddings` reclaims the space.
+
+**Report-only means two different layers.** `/nodes`, `/queue` and the vocab files are
+byte-identical after a run. `data/index.db` is **not** — detection embeds lazily and the derived
+index gains vectors, which ADR-001 makes freely rebuildable and `.gitignore` already excludes.
+The test asserts both directions, because asserting the DB is unchanged would be wrong.
+
+**Rejected:**
+- *MinHash + LSH* — approximation and tuning for a scale this project will not reach.
+- *A `dimension:` key in `models.yaml`* — the width belongs with the DDL that consumes it.
+- *Recomputing embeddings on every reindex* — makes a structural command pay a model cost.
+- *Reusing the `live` pytest marker* — `live` means paid and networked; the model test is free
+  and offline. Merging them would make one impossible to run without the other.
+- *Sharing a cache base module with `llm/_cache.py`* — different payloads, key material and
+  corruption semantics; rule of three, extract if a third cache appears.
+- *Recalibrating thresholds into the original 0.016 band* — a knife-edge the next batch of
+  material would invalidate. Fixing the input widened the margin 3.5× instead.
+
+**Carried into slice 5 — the gray zone holds two different questions.** SPEC §3.1 frames
+adjudication as `SAME | OVERLAP | DISTINCT`, which assumes every flagged pair is a
+*redundancy* question. Real output from the first ingested source says otherwise. Of three
+gray-zone pairs, the weakest was `um-hilfe-bitten` ↔ `verben-mit-praepositionen` at 0.882 —
+not a duplicate at all, but *bitten **um** + Akkusativ*, which is a verb-preposition
+combination and therefore a `governs` relation (SPEC §4.2).
+
+So high similarity means "these are connected", and *how* they are connected is the thing
+adjudication has to decide. Slice 5's outcome set needs a fourth branch:
+
+- `SAME` → discard, append source id and any new examples (§3.2)
+- `OVERLAP` → merge (§4.1)
+- `DISTINCT-but-related` → **propose a typed edge** (§4.2), write nothing to the bodies
+- `DISTINCT` → leave alone
+
+Without that fourth outcome, every genuine relation gets mis-answered as a merge question and
+either fragments the wiki or corrupts a node body.
+
+**All four outcomes route through review. `interrupt()` fires on link proposals exactly as it
+does on merge proposals.** A proposed typed edge is a reviewed write, not a side effect —
+`DISTINCT-but-related` is an *adjudication result awaiting approval*, in the same queue and
+under the same gate as `OVERLAP`.
+
+This is the load-bearing assumption, and stating it is what separates a reading of §4.3 from a
+loophole. §4.3 says relations are a batched background pass, not an ingest-time inference. The
+reason slice 5 may propose an edge from the adjudication pass anyway is *only* that the
+proposal is reviewed — detection has already paid for the neighbour search, so the candidate
+pair is in hand, and what §4.3 protects against is **auto-accepting** it. If a `governs` edge
+could land without approval while a merge required it, §4.3 would be violated after all, and
+ADR-003's "nothing auto-writes to /nodes" with it. An edge changes how the graph is traversed
+and how §5.1 priority scores compute; it is not a lesser write than a body edit.
+
+(§4.3's "auto-accept > 0.9, queue the rest" applies to the *later* batched relation-inference
+pass, once merge acceptance is trustworthy per ADR-003's revisit condition — not to slice 5.)
+- *Mean-centering the vectors to counter e5's anisotropy* — the principled fix for the narrow
+  band, and held in reserve rather than built. The blocking reason is **cache coherence**, not
+  just statefulness: the corpus mean shifts every time a node is added, so vectors cached
+  against an old mean silently drift from query vectors computed against a new one. That turns
+  a stateless transform into one whose cached output has a hidden dependency on corpus
+  composition — the mean would have to enter the cache key, and every addition would invalidate
+  everything. Trimming the input kept the whole pipeline stateless and was enough. Pay that
+  complexity only if the margin closes again at volume.

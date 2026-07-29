@@ -6,6 +6,8 @@ vocab, touched files) is done against tmp copies so the repo is never altered.
 
 from __future__ import annotations
 
+import hashlib
+import math
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -179,3 +181,69 @@ def tmp_raw(tmp_path: Path) -> Path:
 def tmp_queue(tmp_path: Path) -> Path:
     """A throwaway /queue."""
     return tmp_path / "queue"
+
+
+# --- slice 4: embeddings ---
+
+
+class FakeEmbedder:
+    """Deterministic stand-in for the local embedding model.
+
+    Mirrors ``FakeChatClient``: real output shape, a call counter, and no network.
+    The offline suite must never load sentence-transformers or download the ~470MB
+    e5 weights, so every non-slow test injects one of these.
+
+    Vectors are derived from a hash of the text, so they are stable across runs and
+    unrelated texts land far apart -- but ``similar_to`` lets a test place two texts
+    deliberately close, which is what makes the semantic-tier bands testable without
+    a real model.
+
+    ``encode_count`` counts *calls*, ``encoded`` counts texts; both are how the
+    suite proves a cache hit did no work.
+    """
+
+    def __init__(
+        self,
+        *,
+        dimension: int = 384,
+        model: str = "fake-embedder",
+        similar_to: dict[str, str] | None = None,
+    ) -> None:
+        self.dimension = dimension
+        self.model = model
+        # text -> the text whose vector it should sit near (plus a small nudge)
+        self._similar_to = similar_to or {}
+        self.calls: list[list[str]] = []
+        self.encoded: list[str] = []
+
+    @property
+    def encode_count(self) -> int:
+        return len(self.calls)
+
+    def _base_vector(self, text: str) -> list[float]:
+        digest = hashlib.sha256(text.encode("utf-8")).digest()
+        raw = [digest[i % len(digest)] / 255.0 - 0.5 for i in range(self.dimension)]
+        norm = math.sqrt(sum(v * v for v in raw)) or 1.0
+        return [v / norm for v in raw]
+
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(list(texts))
+        self.encoded.extend(texts)
+
+        out = []
+        for text in texts:
+            anchor = self._similar_to.get(text)
+            if anchor is None:
+                out.append(self._base_vector(text))
+                continue
+            # Nudge a copy of the anchor's vector so cosine lands just below 1.0.
+            base = self._base_vector(anchor)
+            nudged = [v + (0.05 if i % 7 == 0 else 0.0) for i, v in enumerate(base)]
+            norm = math.sqrt(sum(v * v for v in nudged)) or 1.0
+            out.append([v / norm for v in nudged])
+        return out
+
+
+@pytest.fixture
+def fake_embedder() -> FakeEmbedder:
+    return FakeEmbedder()
