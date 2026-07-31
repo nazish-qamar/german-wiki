@@ -1,22 +1,33 @@
 ---
 id: um-hilfe-bitten
-title_de: "Um Hilfe bitten"
-title_en: "Asking for help"
+title_de: Um Hilfe bitten
+title_en: Asking for help
 type: phrase
 cefr: A2
-cefr_basis: "grammar:modalverben(A2); konjunktiv-II variant B1"
-register: [alltag, büro, formell, umgangssprachlich]
-themes: [büro, alltag, amt]
+cefr_basis: grammar:modalverben(A2); konjunktiv-II variant B1
+register:
+- alltag
+- büro
+- formell
+- umgangssprachlich
+themes:
+- büro
+- alltag
+- amt
 links:
-  - target: konjunktiv-ii
-    relation: prerequisite_for
-  - target: sie-vs-du
-    relation: prerequisite_for
-  - target: etwas-anbieten
-    relation: contrasts_with
-source_ids: [manual-seed]
+- target: konjunktiv-ii
+  relation: prerequisite_for
+- target: sie-vs-du
+  relation: prerequisite_for
+- target: etwas-anbieten
+  relation: contrasts_with
+source_ids:
+- manual-seed
+- 20260726-test-buero-90458c3d
 confidence: 1.0
 status: stable
+version: 2
+updated_at: '2026-07-31T19:13:42.639430+00:00'
 ---
 
 Same intent, four formality levels. The **grammar carries the politeness**:
