@@ -98,18 +98,48 @@ def test_shipped_embeddings_is_local_and_active(models_config: Path) -> None:
     assert settings.providers["local"].kind == "local"
 
 
-def test_shipped_only_free_models_are_priced(models_config: Path) -> None:
-    """No guessed rates: a paid model must be absent, not estimated.
+def test_known_free_models_carry_an_explicit_zero(models_config: Path) -> None:
+    """"Known-free" and "price unknown" must stay distinguishable (ADR-008 §4).
 
-    Local embeddings carry an explicit zero rather than being omitted, so
-    "known-free" stays distinguishable from "price unknown".
+    Omitting a free model would make it report as unpriced, as if the rate were
+    merely untracked.
     """
     settings = _settings.load_settings(models_config)
-    priced = {model for models in settings.pricing.values() for model in models}
-    assert priced == {"glm-4.5-flash", "intfloat/multilingual-e5-small"}
-    for models in settings.pricing.values():
-        for pricing in models.values():
-            assert (pricing.input, pricing.output) == (0.0, 0.0)
+    flash = settings.pricing["zai"]["glm-4.5-flash"]
+    e5 = settings.pricing["local"]["intfloat/multilingual-e5-small"]
+    assert (flash.input, flash.output) == (0.0, 0.0)
+    assert (e5.input, e5.output) == (0.0, 0.0)
+
+
+def test_every_active_api_step_is_priced(models_config: Path) -> None:
+    """A paid model left unpriced defeats cost tracking entirely (ADR-008 §4).
+
+    This replaces an earlier assertion that the shipped set was *only* free models.
+    That one passed trivially for as long as everything was free, and the first time
+    a paid model legitimately shipped it had to be deleted rather than fixed — a test
+    that can only ever be removed is not protecting anything. This states the real
+    invariant instead, and it starts earning its keep at exactly the moment the old
+    one stopped: slice 5's switch to the paid glm-4.6 (ADR-011 §5).
+    """
+    settings = _settings.load_settings(models_config)
+    unpriced = [
+        (name, resolved.model)
+        for name, step in settings.steps.items()
+        if step.status == "active"
+        and (resolved := _settings.resolve_step(name, settings=settings, env={})).kind == "api"
+        and resolved.pricing is None
+    ]
+    assert unpriced == [], f"active API step(s) with no rate: {unpriced}"
+
+
+def test_a_paid_rate_is_complete(models_config: Path) -> None:
+    """Half a rate under-reports spend, which is worse than an honest gap."""
+    settings = _settings.load_settings(models_config)
+    for provider, models in settings.pricing.items():
+        for model, pricing in models.items():
+            if (pricing.input, pricing.output) == (0.0, 0.0):
+                continue  # explicitly known-free
+            assert pricing.input > 0 and pricing.output > 0, f"{provider}/{model} is half-priced"
 
 
 # --- inheritance ---
