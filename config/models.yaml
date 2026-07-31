@@ -27,14 +27,22 @@ providers:
   local:
     kind: local # in-process sentence-transformers. ADR-004: never an API.
 
-# USD per 1M tokens. ONLY models with a KNOWN rate are listed, and right now
-# that means only the free tier. A model absent here is "unpriced": its tokens
-# are still logged from the API response, but cost is recorded as null and
-# warned once -- never a guessed dollar figure that silently goes stale.
-# Add a real rate here the day you enable a paid model.
+# USD per 1M tokens. ONLY models with a KNOWN rate are listed. A model absent
+# here is "unpriced": its tokens are still logged from the API response, but cost
+# is recorded as null and warned once -- never a guessed dollar figure that
+# silently goes stale. Add a real rate here the day you enable a paid model.
+#
+# Rates are CHECKED, not remembered (ADR-008 §4). The glm-4.6 line below was read
+# off https://docs.z.ai/guides/overview/pricing on 2026-07-31. Worth recording
+# why that matters: a web search for the same figures returned $0.43/$1.75 from a
+# third-party aggregator, which is simply wrong. Re-check against z.ai's own docs
+# before trusting these, and update the date when you do.
 pricing:
   zai:
     glm-4.5-flash: { input: 0.0, cached_input: 0.0, output: 0.0 }
+    # Checked 2026-07-31, docs.z.ai. "Cached input storage" is listed as
+    # limited-time free, so only the cached-token read rate is modelled here.
+    glm-4.6: { input: 0.60, cached_input: 0.11, output: 2.20 }
   # Local embeddings are free, but "free" and "unknown" must stay distinguishable:
   # without an entry they would report as unpriced, as if the rate were merely
   # untracked. An explicit zero says known-free.
@@ -65,23 +73,25 @@ steps:
     # ADR-008 §1); splitting them into two steps later is a config edit, not a
     # code change, which is exactly what per-step routing buys.
     #
-    # Running on glm-4.5-flash, NOT the glm-4.6 SPEC §9 suggests, and that is
-    # deliberate (ADR-011). Flash is free and explicitly zero-priced, and slice 5
-    # is the token-hungriest phase: tuning the prompt, the routing and the review
-    # diffs against real material. Flash exercises the whole mechanism for $0.
+    # Switched from glm-4.5-flash to glm-4.6 on 2026-07-31, with its real price
+    # added above at the same moment (ADR-011 §5).
     #
-    # Switching to glm-4.6 for production verdicts is a one-line edit here. The
-    # model name is in the cache key, so the switch re-adjudicates every pair on
-    # 4.6 -- correct: one paid pass after free tuning. ADD ITS REAL PRICE TO THE
-    # PRICING TABLE AT THAT MOMENT, checked live (ADR-008 §4 forbids a guessed
-    # rate, and leaving a paid model unpriced defeats cost tracking entirely).
+    # Slice 5 was TUNED on flash because it is free and tuning is the
+    # token-hungriest phase. That was never meant to be the production model, and
+    # the measured addendum to ADR-011 §5 is why: flash got BOTH real gray-zone
+    # pairs wrong -- DISTINCT where the answer is `governs`, and `same_family`
+    # where SPEC §4.2 requires a shared stem and there is none. Confident,
+    # well-phrased, and wrong in a way a skimming reviewer waves through. For a
+    # typed-edge system that is wrong pedagogy, so this switch is a correctness
+    # requirement, not a cost trade.
     #
-    # Consequence worth stating: flash adjudications are pipeline development,
-    # not trusted production merges. Every decision record in
-    # logs/decisions.jsonl stores the deciding provider+model, so which verdicts
-    # came from flash stays a grep.
+    # The model name is in the cache key (ADR-008 §1), so this edit re-adjudicates
+    # every pair on 4.6 rather than serving flash's verdicts from cache -- exactly
+    # what is wanted: one paid pass after free tuning. Every decision record in
+    # logs/decisions.jsonl stores the deciding provider+model, so any verdict
+    # already taken on flash stays a grep.
     status: active
-    model: glm-4.5-flash
+    model: glm-4.6
     # 2048 was the planned value and is too tight. A regenerated node body is
     # itself ~1-2k tokens, and GLM spends completion tokens on reasoning FIRST
     # (see the NOTE above) -- so a merge call would return finish_reason:
