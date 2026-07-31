@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from conftest import FakeChatClient
 
-from german_wiki.llm import ModelResponse, Usage
+from german_wiki.llm import ModelResponse, Usage, resolve_step
 from german_wiki.merge import Adjudication, AdjudicationError, _adjudicate, adjudicate
 from german_wiki.models import Node
 
@@ -213,8 +213,11 @@ def test_adjudicate_calls_the_model_and_returns_the_verdict(
     )
     assert isinstance(verdict, Adjudication)
     assert verdict.outcome == "OVERLAP"
-    assert response.model == "glm-4.5-flash"
     assert client.call_count == 1
+    # The response reports whatever the step is routed to, rather than a model this
+    # test pins -- CLAUDE.md puts routing in config, so hardcoding one here would make
+    # a config edit fail an unrelated test (it did, on the glm-4.6 switch).
+    assert response.model == resolve_step("adjudication", settings_path=models_config).model
 
 
 def test_a_second_identical_adjudication_is_free(

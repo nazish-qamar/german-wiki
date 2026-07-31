@@ -212,6 +212,25 @@ def new_examples(winner: Node, loser: Node) -> list[str]:
     Mechanical: no model call. SAME means B teaches nothing new, so its *body* is
     discarded -- but its examples and provenance are still worth keeping, and copying
     them verbatim cannot invent anything.
+
+    **Deliberately conservative, and known to over-keep.** The comparison is textual, so
+    it cannot see that "Kannst du mir helfen?" restates a register level the winner
+    already demonstrates with "Kannst du mir mal kurz helfen?". Observed on the first
+    real SAME merge (`um-hilfe-bitten`, 2026-07-31): three appended lines that were
+    plainer phrasings of levels already in the node's table, trimmed by hand afterwards.
+
+    That is the right default and should not be "fixed" by loosening the comparison. The
+    two errors are not symmetric: over-keeping produces clutter a human deletes in
+    seconds, while dropping an example silently removes material from a study note and
+    is unrecoverable without re-reading /raw. A merge must never decide on its own that
+    a sentence is redundant.
+
+    *Maybe later, once slice 6 lands:* SPEC §6.2 tags register on each **example
+    sentence**, not just the node. With those tags present, "this example demonstrates a
+    du-Ebene request, which the winner already covers" becomes a structural query over
+    tags rather than a semantic judgment -- which is the only version of this refinement
+    that would be safe, because it can state *why* it skipped a line. Until then, keep
+    everything and let the human trim.
     """
     have = {_fold(ex) for ex in example_lines(winner.body_md)}
     return [ex for ex in example_lines(loser.body_md) if _fold(ex) not in have]
