@@ -18,6 +18,8 @@ EXPECTED = {
     "ingest_file",
     "list_queue",
     "promote_source",
+    "read_raw_text",
+    "write_approved",
 }
 
 PACKAGE_DIR = config.PROJECT_ROOT / "src" / "german_wiki"
@@ -35,7 +37,7 @@ def test_every_exported_name_is_importable(name) -> None:
 
 
 def test_the_cli_can_do_its_job_through_the_public_interface_only() -> None:
-    for name in ("ingest_file", "promote_source", "list_queue"):
+    for name in ("ingest_file", "promote_source", "list_queue", "write_approved"):
         assert callable(getattr(ingest, name))
 
 
@@ -79,6 +81,48 @@ def _passes_learn_true(call: ast.Call) -> bool:
 def test_promote_is_the_only_learn_true_caller() -> None:
     """ADR-007: the tag vocabulary grows at exactly one gate, and this proves it."""
     assert _call_sites(_passes_learn_true) == ["ingest/_promote.py"]
+
+
+def _enclosing_functions(predicate) -> list[str]:
+    """``file::function`` for every call matching ``predicate``, via AST.
+
+    Attributing a call to its *enclosing function* is what the file-level check
+    above cannot do. Nested defs report the innermost one, which is the tightest
+    true statement about where the call lives.
+    """
+    found = set()
+    for path in PACKAGE_DIR.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for scope in ast.walk(tree):
+            if not isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for node in ast.walk(scope):
+                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node is not scope:
+                    continue  # a nested def owns its own calls
+                if isinstance(node, ast.Call) and predicate(node):
+                    found.add(f"{path.relative_to(PACKAGE_DIR).as_posix()}::{scope.name}")
+    return sorted(found)
+
+
+def test_write_approved_is_the_only_function_that_learns() -> None:
+    """ADR-007/ADR-011, tightened: the right *function*, not merely the right file.
+
+    Slice 5 moved the ``learn=True`` call out of ``promote_source`` and into
+    ``write_approved`` so the merge pipeline could share one writer. The
+    file-level assertion above would have stayed green either way -- it cannot
+    see the move at all -- so it no longer pins what it exists to pin. This does.
+    """
+    assert _enclosing_functions(_passes_learn_true) == ["ingest/_promote.py::write_approved"]
+
+
+def test_promote_source_does_not_write_nodes_itself() -> None:
+    """The seam only holds while every caller goes *through* write_approved."""
+
+    def _write_node_call(call: ast.Call) -> bool:
+        func = call.func
+        return isinstance(func, ast.Attribute) and func.attr == "write_node"
+
+    assert "ingest/_promote.py::promote_source" not in _enclosing_functions(_write_node_call)
 
 
 def test_every_normalize_call_states_learn_explicitly() -> None:

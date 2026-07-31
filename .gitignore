@@ -12,9 +12,19 @@ dist/
 # is excluded, and llm_usage.jsonl is the tracked cost ledger (SPEC §10).
 logs/*
 !logs/llm_usage.jsonl
+# decisions.jsonl is tracked for a stronger reason than the cost ledger: it is
+# the authoritative regeneration count behind the SPEC §12.1 merge cap. Losing
+# llm_usage.jsonl costs a statistic; losing this one would disarm a safety guard
+# (ADR-011), so git is its recovery path.
+!logs/decisions.jsonl
 data/*.db
 .cache/
 # Staging for ingested candidates awaiting `gw promote` (ADR-003). Not a durable
 # artifact -- /raw and /nodes are the tracked record.
 queue/
+# Same reasoning one slice on: pending adjudication results awaiting `gw review`.
+# A proposal is resolved by approval-or-rejection and deleted either way, so the
+# directory only ever holds pending work. The durable record of what happened is
+# the commit to /nodes that an approval produces, plus logs/decisions.jsonl.
+proposals/
    

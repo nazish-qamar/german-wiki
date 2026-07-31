@@ -186,3 +186,18 @@ def read_sidecar(source_id: str, *, raw_dir: Path | str | None = None) -> dict[s
     if not sidecar_path.is_file():
         return None
     return json.loads(sidecar_path.read_text(encoding="utf-8"))
+
+
+def read_raw_text(source_id: str, *, raw_dir: Path | str | None = None) -> str | None:
+    """The verbatim source text behind a node, or ``None`` if it is not on disk.
+
+    This is the read side of SPEC §12.1's re-verification anchor: a node body is a
+    derived view, and ``/raw`` is what you check it against when a merge looks like it
+    has drifted. Slice 5's merge guard uses it to ask whether a regenerated example
+    sentence actually came from somewhere. Read-only -- nothing outside ingestion ever
+    writes to ``/raw``.
+    """
+    text_path, _ = raw_paths(source_id, raw_dir=raw_dir)
+    if not text_path.is_file():
+        return None
+    return text_path.read_bytes().decode("utf-8")

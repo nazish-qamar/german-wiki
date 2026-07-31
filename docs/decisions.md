@@ -421,3 +421,184 @@ pass, once merge acceptance is trustworthy per ADR-003's revisit condition — n
   composition — the mean would have to enter the cache key, and every addition would invalidate
   everything. Trimming the input kept the whole pipeline stateless and was enough. Pay that
   complexity only if the margin closes again at volume.
+
+---
+
+## ADR-011 — Slice 5: proposals as durable state, four outcomes, and two unequal drift guards
+
+**Decided:** Slice 5 turns slice 4's gray-zone list into reviewed decisions. Seven things
+inside it are worth not re-litigating.
+
+**1. The durable state between adjudication and review is a FILE, not a paused graph.**
+`interrupt()` needs a checkpointer, but nothing here needs a *paused graph* to survive the
+process. `gw adjudicate` runs to `interrupt()`, writes one Markdown-with-frontmatter
+proposal per proposed decision into `/proposals`, and exits. `gw review` reads those files
+minutes or days later. So `InMemorySaver` is sufficient and no new dependency is needed.
+
+Re-deriving a proposal's context on the apply pass is free, because adjudication is
+content-hash cached (ADR-005) and embeddings are cached (ADR-010) — **the cache is the
+checkpointer**. A `SqliteSaver` was rejected: it adds a dependency, puts pending human
+decisions in an opaque binary store inside `data/`, which ADR-001 declares freely
+deletable, and creates a second source of truth for "what is pending" that would drift
+from the files and the index.
+
+`/proposals` is gitignored exactly like `/queue`. A proposal is resolved by
+approval-or-rejection and deleted either way, so the directory only ever holds pending
+work. The durable record is the commit to `/nodes` that approval produces, plus
+`logs/decisions.jsonl`.
+
+**2. Merges and links share one queue, one format, one command.** ADR-010 says a proposed
+edge sits "in the same queue and under the same gate as OVERLAP", and a second,
+lighter-feeling queue for links is precisely the loophole §4.3's reinterpretation has to
+avoid. `kind` is a field, not a directory.
+
+**3. The gate is topological, not conventional.** The graph has **no edge** from
+`adjudicate` to any apply node; `adjudicate` ends at `END`. The only way into `route` is to
+enter the graph already holding a human decision, which only `gw review` does. So even a
+resume of the propose pass cannot reach a write. AST tests pin `interrupt()` to the
+adjudication node and pin the apply functions to a single caller.
+
+**Routing is implemented exactly once.** `_apply.apply_merge/link/create/discard` is the
+implementation; the graph's four nodes are thin wrappers, and `gw review` drives the graph
+rather than a parallel copy. Two implementations is how one of them quietly stops honouring
+the gate.
+
+**4. Everything writes through the slice-3 promote seam.** `write_approved` was factored
+out of `promote_source` and is now the single `write_node(..., learn=True)` call site *and*
+the create-vs-overwrite precondition (`expect_exists`). Two responsibilities on one
+function, so the ADR-007 test was **tightened from file-level to function-level**: the old
+assertion (*the call is in `ingest/_promote.py`*) would have stayed green whether the call
+lived in `promote_source` or `write_approved` — it could not see the refactor at all, and
+so no longer pinned what it existed to pin.
+
+**5. Adjudication runs on `glm-4.5-flash` during tuning, not SPEC §9's `glm-4.6`.** Flash
+is free and explicitly zero-priced, and slice 5 is the token-hungriest phase. The switch is
+a one-line YAML edit; the model name is in the cache key, so it re-adjudicates every pair
+on 4.6 — one paid pass after free tuning. **Add 4.6's real price at that moment**, checked
+live (ADR-008 §4 forbids a guessed rate, and a paid model left unpriced defeats cost
+tracking entirely). Consequence: flash verdicts are pipeline development, not trusted
+production merges, so every decision record stores the deciding `provider`/`model` and
+"which merges came from flash?" stays a grep.
+
+***§5 addendum (measured, 2026-07-31).*** The paragraph above was written as a prediction.
+It has now been tested. `glm-4.5-flash` was run against two real gray-zone pairs from the
+first ingested source and produced defensible-sounding but incorrect verdicts on **both**:
+
+- **0.882 — `um-hilfe-bitten` ↔ `verben-mit-praepositionen`:** answered `DISTINCT`
+  ("A focuses on politeness levels in requests for help, while B covers verb-preposition
+  combinations requiring specific cases"), missing that *bitten **um*** is itself one of
+  B's verb-preposition combinations. Correct answer: `governs`.
+- **0.900 — `verben-mit-praepositionen` ↔ `wechselpraepositionen`:** answered
+  `same_family`, which per SPEC §4.2 means a **shared root or stem**
+  (*stellen/stehen/setzen/sitzen*). These two share none. A plausible-sounding but
+  definitionally wrong relation *type*.
+
+Both failures are the same shape: confident, well-phrased, and wrong in a way a reviewer
+skimming "yes, these are related" could wave through. The second is the more instructive,
+because a typed-edge system's whole value is that the *type* carries meaning — §4.2 exists
+precisely because generic backlinks produce a useless hairball, and a mislabelled edge is
+worse than no edge, since §5.1's priority scores and the §6.1 morphological clusters both
+read the type as a fact.
+
+**So the 4.6 switch is a correctness requirement, not a cost trade.** The risk is not
+obviously-bad output a human catches; it is plausibly-wrong relation types that erode the
+pedagogical meaning of the graph while every individual proposal looks reasonable. Anyone
+reaching for "flash is free and seems fine, let's keep it for verdicts too" should read the
+two bullets above first — that is why they are recorded here rather than only in a test.
+
+`tests/test_merge_live.py` pins this: the ADR-010 `governs` verdict is asserted **strictly**
+and marked `xfail(strict=True, raises=AssertionError)` while the configured adjudication
+model is in `TUNING_MODELS`, keyed off `resolve_step("adjudication").model` so the
+strictness tracks config automatically. Switching to 4.6 flips it to a hard assertion with
+no test edit. `raises=AssertionError` matters: a bare `xfail` would swallow a rate-limit or
+truncation error and report the same XFAIL as a wrong verdict — the test would look like it
+had confirmed this claim while never reaching an assertion. Same principle as §6's ledger
+read: "unknown" must never be indistinguishable from "checked, as expected".
+
+**6. The two SPEC §12.1 drift guards bite with deliberately different force.**
+
+*Unsourced example sentences → flag.* Example lines in a regenerated body are checked
+against A, B and their `/raw` texts, and misses are marked ⚠ in the review diff. The
+check is fuzzy — legitimate paraphrase produces non-verbatim examples that are not drift —
+so a hard refusal would false-positive and get routed around. The human gate (ADR-003) is
+the real guard; this aims attention. The check runs on the `## Examples` section only:
+prose is legitimately rewritten on merge, but a fabricated example sentence is a fact you
+would memorize.
+
+*Regeneration cap → hard refuse.* An exact integer with no false positives, guarding the
+one drift a reviewer structurally **cannot** see: the reviewer judges one diff at a time
+and never sees cumulative divergence across many merges. A capped node emits a `MANUAL`
+proposal rather than dead-ending. The cap and `/raw` immutability are two halves of one
+defence — the cap stops drift accumulating, and raw-immutability is what lets a capped node
+be *re-derived from its sources* rather than re-merged from its already-drifted state.
+
+Only `OVERLAP` counts toward the cap. `SAME` appends provenance and new example lines
+mechanically, with no model call and no re-encoding, so it is not a regeneration.
+
+**`logs/decisions.jsonl` is therefore a different class of artifact from
+`logs/llm_usage.jsonl`.** ADR-008 §5 tracks the cost ledger because spend history is a
+durable record; losing it costs a statistic. This one is the *authoritative regeneration
+count*, so losing it would disarm a safety guard. Two consequences: it is git-tracked (a
+second `.gitignore` negation), and **`merge_count` raises rather than returning 0** when it
+cannot read the file. A missing ledger must never be indistinguishable from "never merged".
+
+That forces a three-state read, because a strict "missing → always refuse" would dead-end a
+fresh clone, where the ledger is legitimately absent:
+
+| ledger | node | result |
+|---|---|---|
+| readable | any | authoritative count; `version` is not consulted |
+| missing / corrupt | `version` unset or 1 | proceed — never merged, nothing was lost |
+| missing / corrupt | `version` > 1 | **refuse**, and name `git restore` as the fix |
+
+`Node.version` is a **tripwire, never the count**. It is hand-editable, so it cannot be
+trusted to *permit* a merge — but it can be trusted to *forbid* one, since a wrong value in
+that direction costs only a refusal. One corrupt line poisons the whole read rather than
+being skipped, because skipping would silently undercount into the same fail-open.
+
+The asymmetry is deliberate: the "don't re-propose an already-decided pair" lookup handles
+an unreadable ledger *permissively*, because forgetting a rejection costs one redundant
+question while forgetting a merge would let the cap fail open.
+
+**7. OVERLAP regeneration demotes status: `stable` → `reviewed`. SAME and links leave
+status untouched.** Status is the trust signal, and OVERLAP is a lossy machine re-encoding
+(§12.1) — the node's body was rewritten and only confirmed as a *diff*, not re-vetted
+whole, so `stable` would overclaim.
+
+This mirrors the cap exactly: the operation that counts toward `MAX_REGENERATIONS` is the
+same operation that demotes status. **"OVERLAP is the drift event", applied to both
+guards.** That symmetry is structural rather than coincidental — `_apply._status_after`
+keys off `_ledger.REGENERATING_OUTCOMES`, the same frozenset the cap counts, so the two
+guards cannot silently disagree after a future edit to either one. A test asserts the
+biconditional directly.
+
+Demotion **caps at `reviewed`, never forces `draft`**: a regeneration should stop a node
+claiming more than it re-earned, not undo the review it already had. `draft` and `reviewed`
+nodes are already at or below that ceiling and are unaffected.
+
+**Also:** the graph's unit is one candidate, which has one *fate* plus zero or more typed
+edges — so `DISTINCT_RELATED` yields a `create` **and** a `link`, and creates are applied
+before links so an edge never dangles. Candidates are compared against `/nodes`, not
+against each other. The `duplicate` band (≥ `GRAY_HIGH`) resolves to SAME with **no model
+call** but still produces a proposal: confidence saves the call, not the human gate. The
+few-shot exemplars deliberately exclude ADR-010's `um-hilfe-bitten` ↔
+`verben-mit-praepositionen` pair, because that pair is the live test's assertion and
+teaching it would make the test measure prompt recall instead of generalization.
+
+**Rejected:**
+- *`langgraph-checkpoint-sqlite` + `SqliteSaver`* — a dependency and a second source of
+  truth, to persist a paused graph nothing needs to resume.
+- *A separate queue or an auto-accept threshold for link proposals* — the exact loophole
+  ADR-010 §4.3 warns about.
+- *Implementing routing twice, once as graph nodes and once as review helpers* — how one
+  copy stops honouring the gate.
+- *Hard-refusing unsourced examples* — fuzzy check, so it would false-positive on
+  legitimate reformatting and get worked around.
+- *Reading the regeneration count from `Node.version`* — hand-editable and absent on the
+  seed nodes; sound as a tripwire, unsound as an authority.
+- *Treating a missing ledger as count 0* — the fail-open this whole section exists to
+  prevent.
+- *Retaining `stable` through a regeneration* — makes status a sticky label that survives
+  the very operation it should respond to.
+- *Demoting all the way to `draft` on regeneration* — throws away a review that did happen,
+  and would make every merge feel like starting over.

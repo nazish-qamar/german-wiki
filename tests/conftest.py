@@ -247,3 +247,24 @@ class FakeEmbedder:
 @pytest.fixture
 def fake_embedder() -> FakeEmbedder:
     return FakeEmbedder()
+
+
+# --- slice 5: merge pipeline + review ---
+
+
+@pytest.fixture
+def tmp_proposals(tmp_path: Path) -> Path:
+    """A throwaway /proposals; the repo's proposals/ is never written by tests."""
+    return tmp_path / "proposals"
+
+
+@pytest.fixture
+def tmp_merged(tmp_path: Path) -> Path:
+    """A throwaway /_merged; the tracked archive is never written by tests."""
+    return tmp_path / "_merged"
+
+
+@pytest.fixture
+def tmp_decisions(tmp_path: Path) -> Path:
+    """A throwaway decision ledger; the tracked logs/decisions.jsonl is never touched."""
+    return tmp_path / "decisions.jsonl"

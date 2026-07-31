@@ -44,3 +44,17 @@ USAGE_LOG_PATH = _path_env("GW_USAGE_LOG", LOGS_DIR / "llm_usage.jsonl")
 # --- slice 3: ingestion ---
 RAW_DIR = _path_env("GW_RAW_DIR", PROJECT_ROOT / "raw")
 QUEUE_DIR = _path_env("GW_QUEUE_DIR", PROJECT_ROOT / "queue")
+
+# --- slice 5: merge pipeline + review ---
+# Pending adjudication results awaiting `gw review`. Gitignored like QUEUE_DIR:
+# transient staging, resolved by approval-or-rejection (ADR-011).
+PROPOSALS_DIR = _path_env("GW_PROPOSALS_DIR", PROJECT_ROOT / "proposals")
+
+# Archived losing nodes from approved merges (SPEC §3.2: never silently delete).
+# Git-TRACKED, unlike the two staging dirs -- it is the audit trail.
+MERGED_DIR = _path_env("GW_MERGED_DIR", PROJECT_ROOT / "_merged")
+
+# One record per human decision. Git-tracked and load-bearing: it is the
+# authoritative regeneration count for the SPEC §12.1 drift cap, not just a
+# statistic (ADR-011).
+DECISIONS_LOG_PATH = _path_env("GW_DECISIONS_LOG", LOGS_DIR / "decisions.jsonl")

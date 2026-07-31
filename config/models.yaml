@@ -58,10 +58,35 @@ steps:
     model: glm-4.5-flash
     max_tokens: 4096
 
-  adjudication: # SPEC §3.1 tier 3 + §4.1 -- SAME|OVERLAP|DISTINCT, merge. Slice 5.
-    status: planned
-    model: glm-4.6
-    max_tokens: 2048
+  adjudication: # SPEC §3.1 tier 3 + §4.1/§4.2 -- the four outcomes + merge. Slice 5.
+    # Active since slice 5. Serves BOTH adjudication calls -- the four-outcome
+    # classification and the merge regeneration. They are different prompts, so
+    # they share no cache entry (the key covers the request, not the step:
+    # ADR-008 §1); splitting them into two steps later is a config edit, not a
+    # code change, which is exactly what per-step routing buys.
+    #
+    # Running on glm-4.5-flash, NOT the glm-4.6 SPEC §9 suggests, and that is
+    # deliberate (ADR-011). Flash is free and explicitly zero-priced, and slice 5
+    # is the token-hungriest phase: tuning the prompt, the routing and the review
+    # diffs against real material. Flash exercises the whole mechanism for $0.
+    #
+    # Switching to glm-4.6 for production verdicts is a one-line edit here. The
+    # model name is in the cache key, so the switch re-adjudicates every pair on
+    # 4.6 -- correct: one paid pass after free tuning. ADD ITS REAL PRICE TO THE
+    # PRICING TABLE AT THAT MOMENT, checked live (ADR-008 §4 forbids a guessed
+    # rate, and leaving a paid model unpriced defeats cost tracking entirely).
+    #
+    # Consequence worth stating: flash adjudications are pipeline development,
+    # not trusted production merges. Every decision record in
+    # logs/decisions.jsonl stores the deciding provider+model, so which verdicts
+    # came from flash stays a grep.
+    status: active
+    model: glm-4.5-flash
+    # 2048 was the planned value and is too tight. A regenerated node body is
+    # itself ~1-2k tokens, and GLM spends completion tokens on reasoning FIRST
+    # (see the NOTE above) -- so a merge call would return finish_reason:
+    # "length" with empty content. Matched to extraction's budget.
+    max_tokens: 4096
     fallback: { provider: deepseek, model: deepseek-chat }
 
   vision: # SPEC §9 -- image/PDF OCR. Slice 8.
