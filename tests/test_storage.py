@@ -20,10 +20,10 @@ def test_round_trip_equal(seed_nodes, tmp_path, tmp_vocab, sid):
 
 
 def test_absent_vs_empty_preserved(seed_nodes, tmp_path, tmp_vocab):
-    we = seed_nodes["wechselpraepositionen"]
+    we = seed_nodes["wechselpräpositionen"]
     pa = seed_nodes["prefix-an"]
 
-    we_out = tmp_path / "wechselpraepositionen.md"
+    we_out = tmp_path / "wechselpräpositionen.md"
     pa_out = tmp_path / "prefix-an.md"
     storage.write_node(we, we_out, vocab_dir=tmp_vocab)
     storage.write_node(pa, pa_out, vocab_dir=tmp_vocab)

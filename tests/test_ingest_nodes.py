@@ -22,7 +22,7 @@ def _candidate(**overrides) -> Candidate:
         "title_en": "Two-way prepositions",
         "type": "grammar",
         "cefr": "A2",
-        "cefr_basis": "grammar:wechselpraepositionen",
+        "cefr_basis": "grammar:wechselpräpositionen",
         "register": ["alltag"],
         "themes": ["haushalt"],
         "body_md": "Akkusativ bei Bewegung, Dativ bei Ort.\n\n## Examples\n- Ich gehe in die Küche.",
@@ -49,16 +49,38 @@ def _records() -> list[logging.LogRecord]:
 @pytest.mark.parametrize(
     "title,expected",
     [
-        ("Wechselpräpositionen", "wechselpraepositionen"),
+        ("Wechselpräpositionen", "wechselpräpositionen"),
         ("waschen (Wortfamilie)", "waschen-wortfamilie"),
-        ("Straße & Verkehr", "strasse-verkehr"),
+        ("Straße & Verkehr", "straße-verkehr"),
         ("um Hilfe bitten", "um-hilfe-bitten"),
-        ("Präfix an-", "praefix-an"),
+        ("Präfix an-", "präfix-an"),
         ("!!!", "konzept"),
     ],
 )
-def test_node_id_reproduces_the_seed_convention(title, expected) -> None:
+def test_node_id_keeps_real_german(title, expected) -> None:
+    """ADR-012: a node id is human-facing, so it carries the actual word.
+
+    Renamed from ``..._reproduces_the_seed_convention``: the hand-authored seeds used
+    ``ae``/``ss`` digraphs, and this deliberately no longer matches them. Source ids
+    still do -- see ``test_ingest_raw.py``, which asserts the opposite behaviour on
+    purpose.
+    """
     assert _nodes.node_id_for(title, taken=set()) == expected
+
+
+def test_node_id_normalizes_precomposed_and_decomposed_umlauts() -> None:
+    """The hazard that made ASCII slugs defensible, now handled rather than dodged.
+
+    ``ä`` is U+00E4 precomposed and U+0061 U+0308 decomposed -- identical on screen,
+    different bytes, and macOS stores filenames in the second form while Linux and
+    Windows use the first. Without NFC these would be two node ids for one word, which
+    is precisely the fragmentation ADR-006 exists to prevent.
+    """
+    precomposed = "Prüfung"
+    decomposed = "Prüfung"
+    assert precomposed != decomposed  # genuinely different strings
+    assert _nodes.node_id_for(precomposed, taken=set()) == "prüfung"
+    assert _nodes.node_id_for(decomposed, taken=set()) == "prüfung"
 
 
 def test_id_collision_within_a_batch_gets_a_suffix() -> None:
@@ -117,7 +139,7 @@ def test_mapping_preserves_candidate_content() -> None:
 def test_cefr_basis_is_marked_provisional_with_the_model_reason() -> None:
     """SPEC §5: LLM CEFR is unreliable; slice 6 must be able to find every one."""
     node = _nodes.to_node(_candidate(), source_id=SOURCE_ID, node_id="x", now=NOW)
-    assert node.cefr_basis == "llm:extraction; grammar:wechselpraepositionen"
+    assert node.cefr_basis == "llm:extraction; grammar:wechselpräpositionen"
     assert node.cefr_basis.startswith(_nodes.PROVISIONAL_CEFR)
 
 
@@ -141,9 +163,9 @@ def test_to_nodes_decollides_across_the_batch(tmp_nodes: Path, tmp_queue: Path) 
         candidates, source_id=SOURCE_ID, nodes_dir=tmp_nodes, queue_dir=tmp_queue, now=NOW
     )
     assert [n.id for n in nodes] == [
-        "wechselpraepositionen-2",  # the seed already owns the bare id
-        "wechselpraepositionen-3",
-        "wechselpraepositionen-4",
+        "wechselpräpositionen-2",  # the seed already owns the bare id
+        "wechselpräpositionen-3",
+        "wechselpräpositionen-4",
     ]
 
 

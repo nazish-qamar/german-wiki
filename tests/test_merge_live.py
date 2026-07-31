@@ -6,7 +6,7 @@ adjudication test that opens a socket.
     GW_LIVE_TESTS=1 pytest -m live
 
 What it asserts is the finding that reshaped this slice. ``um-hilfe-bitten`` and
-``verben-mit-praepositionen`` sit at cosine 0.882 -- squarely in the gray zone -- and
+``verben-mit-präpositionen`` sit at cosine 0.882 -- squarely in the gray zone -- and
 SPEC §3.1's three outcomes would force that pair to be answered as a redundancy question:
 merge two unrelated concepts, or call them DISTINCT and lose the connection entirely. It
 is neither. It is *bitten **um** + Akkusativ*, a verb-preposition combination, which
@@ -53,20 +53,32 @@ def _configured_model() -> str:
     return resolve_step("adjudication").model
 
 # The A side is a seed node; the B side is the candidate slice 4 flagged against it.
+#
+# B is looked up in /nodes first and /queue second, because it legitimately lives in
+# either: staged before review, promoted after. Pinning it to /queue alone meant this
+# test silently started skipping the moment the candidate was approved -- and a gated
+# test that always skips is a test that never runs, which is worse than a failing one
+# because nothing reports it.
 NODE_A = config.NODES_DIR / "um-hilfe-bitten.md"
-QUEUED_B = config.QUEUE_DIR / "20260726-test-buero-90458c3d" / "verben-mit-praepositionen.md"
+NODE_B_NAME = "verben-mit-präpositionen.md"
+B_LOCATIONS = [
+    config.NODES_DIR / NODE_B_NAME,
+    config.QUEUE_DIR / "20260726-test-buero-90458c3d" / NODE_B_NAME,
+]
 
 
 @pytest.fixture
 def pair():
     if not NODE_A.is_file():
         pytest.skip(f"seed node missing: {NODE_A}")
-    if not QUEUED_B.is_file():
+    b = next((p for p in B_LOCATIONS if p.is_file()), None)
+    if b is None:
         pytest.skip(
-            f"the queued candidate is gone: {QUEUED_B}. Re-create it with "
+            f"{NODE_B_NAME} is in neither /nodes nor /queue (looked in "
+            f"{[str(p) for p in B_LOCATIONS]}). Re-create it with "
             "`gw ingest -f test-büro.txt --force` (the extraction call is cached)."
         )
-    return storage.load_node(NODE_A), storage.load_node(QUEUED_B)
+    return storage.load_node(NODE_A), storage.load_node(b)
 
 
 def test_live_the_0882_pair_never_merges(pair, tmp_path: Path) -> None:

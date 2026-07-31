@@ -602,3 +602,75 @@ teaching it would make the test measure prompt recall instead of generalization.
   the very operation it should respond to.
 - *Demoting all the way to `draft` on regeneration* — throws away a review that did happen,
   and would make every merge feel like starting over.
+
+---
+
+## ADR-012 — Node ids carry real German; source ids stay ASCII
+
+**Decided:** The two identifier types deliberately differ.
+
+- **Node ids** preserve umlauts and ß: `Wechselpräpositionen` → `wechselpräpositionen`.
+- **Source ids** stay transliterated ASCII: `test-büro.txt` → `20260726-test-buero-<hash>`.
+
+`ingest/_raw.py` therefore exposes two slug functions rather than one. `node_slug`
+NFC-normalizes and keeps the letters; `slugify` transliterates (ä→ae, ß→ss) and strips
+remaining diacritics. `_nodes.node_id_for` uses the first, `_raw.resolve_source_id` the
+second.
+
+**Why they differ, rather than one convention winning.** They are not the same kind of
+name:
+
+A **node id is human-facing**. It is the filename, and ADR-002 keeps these files plain
+Markdown specifically so the vault opens in Obsidian for graph view — where Obsidian
+labels every note by its *filename*. So the id is what you read in the sidebar and on
+every graph node. It is also the value in `links: target:`, and the argument you type
+into `gw review --proposal` and `gw promote`. Content was always proper UTF-8 (titles,
+bodies, examples, tags, `/raw`); only the id was transliterated, which made the graph the
+one place the wiki looked less German than it is. In a toolchain that is UTF-8 end to end,
+that bought nothing.
+
+A **source id is an opaque machine handle**. It names a file in `/raw`, which SPEC §1.2
+makes immutable and append-only, and it already carries a content hash (`…-90458c3d`) that
+marks it as machine-generated. Nobody reads it as German. More decisively: because `/raw`
+is append-only, its filenames are *historical records* and are never renamed — so changing
+the convention would not migrate the existing ones, it would only leave `/raw` permanently
+mixed. ASCII there is not a compromise, it is the correct answer for a name that can never
+be revised.
+
+**NFC normalization is what makes umlaut ids safe, and it is load-bearing.** `ä` has two
+encodings — precomposed U+00E4 and decomposed U+0061 U+0308 — identical on screen,
+different bytes, therefore different filenames. macOS stores filenames NFD while Linux and
+Windows use NFC. Without normalizing, the same title arriving in the other form would
+create a *second node for a word that already has one*: exactly the fragmentation ADR-006
+exists to prevent. `node_slug` normalizes to NFC before slugging, which removes the hazard
+rather than dodging it — and dodging it was the strongest argument for ASCII ids in the
+first place.
+
+**Migration was done in one atomic step**, at 5 nodes, because a half-applied rename would
+leave `wechselpraepositionen` and `wechselpräpositionen` coexisting as two nodes for one
+concept. Verified before renaming: zero `links: target:` and zero `source_ids` entries in
+either the live corpus or the frozen fixtures referenced a changing slug — every existing
+link target is a forward reference to a node not yet written. That is why this cost two
+file renames and no link rewrites; it would not have stayed that cheap.
+
+The embedding cache was unaffected: ADR-010 keys it on `(model, embed_text)`, and
+`embed_text` is built from `title_de` plus the body, never the id. `gw reindex` restored
+all five vectors.
+
+**A future session must not "fix" the inconsistency.** It is deliberate, and both
+directions of `fix` break something: transliterating node ids throws away the German in
+the Obsidian graph and in every link target, while un-transliterating source ids means
+renaming files in an append-only store whose whole guarantee is that they are never
+touched. `tests/test_ingest_raw.py::test_the_two_slug_functions_deliberately_disagree`
+asserts the divergence directly so a well-meaning unification fails loudly.
+
+**Rejected:**
+- *One slug function for both* — simpler, but it forces the wrong answer on one of the two
+  identifier types whichever way it goes.
+- *Umlaut source ids* — would rename nothing that already exists (append-only `/raw`) and
+  so would only fragment the convention.
+- *Keeping ASCII node ids* — the status quo, and defensible only while the NFC hazard was
+  unhandled. Once normalized, its remaining cost was a graph view that spells your own
+  notes wrong.
+- *Deferring the migration* — the rename is free only while no `links: target:` points at
+  a changing slug. That window closes as soon as the wiki cross-references itself.

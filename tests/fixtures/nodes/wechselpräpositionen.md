@@ -1,5 +1,5 @@
 ---
-id: wechselpraepositionen
+id: wechselpräpositionen
 title_de: Wechselpräpositionen
 title_en: Two-way prepositions
 type: grammar

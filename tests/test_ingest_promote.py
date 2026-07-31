@@ -68,8 +68,8 @@ def test_promotes_every_queued_node(tmp_queue, empty_nodes, tmp_vocab, tmp_db) -
     )
     result = _run(tmp_queue, empty_nodes, tmp_vocab, tmp_db)
 
-    assert sorted(result.promoted) == ["dativ", "wechselpraepositionen"]
-    assert sorted(p.stem for p in empty_nodes.glob("*.md")) == ["dativ", "wechselpraepositionen"]
+    assert sorted(result.promoted) == ["dativ", "wechselpräpositionen"]
+    assert sorted(p.stem for p in empty_nodes.glob("*.md")) == ["dativ", "wechselpräpositionen"]
     assert result.refused == []
 
 
@@ -77,7 +77,7 @@ def test_promoted_nodes_survive_the_round_trip(tmp_queue, empty_nodes, tmp_vocab
     _queue(tmp_queue, empty_nodes, tmp_vocab, [_candidate()])
     _run(tmp_queue, empty_nodes, tmp_vocab, tmp_db)
 
-    node = storage.load_node(empty_nodes / "wechselpraepositionen.md")
+    node = storage.load_node(empty_nodes / "wechselpräpositionen.md")
     assert node.status == "draft"
     assert node.source_ids == [SOURCE_ID]
     assert node.title_de == "Wechselpräpositionen"
@@ -136,7 +136,7 @@ def test_tags_are_normalized_into_nodes(tmp_queue, empty_nodes, tmp_vocab, tmp_d
     _queue(tmp_queue, empty_nodes, tmp_vocab, [_candidate(themes=["  KITCHEN "])])
     _run(tmp_queue, empty_nodes, tmp_vocab, tmp_db)
 
-    assert storage.load_node(empty_nodes / "wechselpraepositionen.md").themes == ["küche"]
+    assert storage.load_node(empty_nodes / "wechselpräpositionen.md").themes == ["küche"]
 
 
 # --- refusals: never overwrite, never block the batch ---
@@ -146,7 +146,7 @@ def test_existing_node_is_refused_and_stays_queued(
     tmp_queue, empty_nodes, tmp_vocab, tmp_db
 ) -> None:
     paths = _queue(tmp_queue, empty_nodes, tmp_vocab, [_candidate()])
-    existing = empty_nodes / "wechselpraepositionen.md"
+    existing = empty_nodes / "wechselpräpositionen.md"
     existing.write_text("---\nhandmade\n---\n", encoding="utf-8")
 
     result = _run(tmp_queue, empty_nodes, tmp_vocab, tmp_db)
@@ -173,15 +173,15 @@ def test_an_invalid_hand_edit_is_refused_but_others_promote(
 
     result = _run(tmp_queue, empty_nodes, tmp_vocab, tmp_db)
 
-    assert result.promoted == ["wechselpraepositionen"]
+    assert result.promoted == ["wechselpräpositionen"]
     assert [r.node_id for r in result.refused] == ["dativ"]
     assert broken.exists()  # left for you to fix
-    assert (empty_nodes / "wechselpraepositionen.md").exists()
+    assert (empty_nodes / "wechselpräpositionen.md").exists()
 
 
 def test_refused_queue_dir_is_not_removed(tmp_queue, empty_nodes, tmp_vocab, tmp_db) -> None:
     _queue(tmp_queue, empty_nodes, tmp_vocab, [_candidate()])
-    (empty_nodes / "wechselpraepositionen.md").write_text("x", encoding="utf-8")
+    (empty_nodes / "wechselpräpositionen.md").write_text("x", encoding="utf-8")
     _run(tmp_queue, empty_nodes, tmp_vocab, tmp_db)
     assert (tmp_queue / SOURCE_ID).is_dir()
 
@@ -205,5 +205,5 @@ def test_rejecting_a_candidate_means_deleting_its_file(
 
     result = _run(tmp_queue, empty_nodes, tmp_vocab, tmp_db)
 
-    assert result.promoted == ["wechselpraepositionen"]
+    assert result.promoted == ["wechselpräpositionen"]
     assert not (empty_nodes / "unsinn.md").exists()

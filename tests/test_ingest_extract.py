@@ -45,7 +45,7 @@ def _candidate(**overrides) -> dict:
         "title_en": "Two-way prepositions",
         "type": "grammar",
         "cefr": "A2",
-        "cefr_basis": "grammar:wechselpraepositionen",
+        "cefr_basis": "grammar:wechselpräpositionen",
         "register": ["alltag"],
         "themes": ["haushalt"],
         "body_md": "Akkusativ bei Bewegung, Dativ bei Ort.",

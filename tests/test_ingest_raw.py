@@ -38,6 +38,7 @@ def _store(text: str, name: str, tmp_raw: Path) -> str:
     ],
 )
 def test_slugify(text, expected) -> None:
+    """Source ids stay ASCII on purpose (ADR-012) -- ä->ae, ß->ss, é stripped."""
     assert _raw.slugify(text) == expected
 
 
@@ -45,6 +46,31 @@ def test_slugify_truncates_and_never_ends_in_a_hyphen() -> None:
     slug = _raw.slugify("wort " * 40)
     assert len(slug) <= 40
     assert not slug.endswith("-")
+
+
+def test_the_two_slug_functions_deliberately_disagree() -> None:
+    """ADR-012's whole point, in one assertion.
+
+    A source id names an immutable ``/raw`` file (SPEC §1.2) and is an opaque handle
+    carrying a content hash — nobody reads it as German and nobody renames it, so it
+    stays ASCII. A node id is what Obsidian shows as the note's name, what appears in
+    ``links: target:``, and what you type into ``gw review`` — so it carries the real
+    word.
+
+    This asserts they differ *because a future session will otherwise "fix" the
+    inconsistency*, and doing so in either direction breaks something: transliterating
+    node ids loses the German, while un-transliterating source ids would rename files
+    in an append-only store.
+    """
+    assert _raw.slugify("Wechselpräpositionen") == "wechselpraepositionen"
+    assert _raw.node_slug("Wechselpräpositionen") == "wechselpräpositionen"
+    assert _raw.slugify("Straße") == "strasse"
+    assert _raw.node_slug("Straße") == "straße"
+
+
+def test_node_slug_folds_unicode_normalization_forms() -> None:
+    """Precomposed U+00E4 and decomposed U+0061+U+0308 must not become two ids."""
+    assert _raw.node_slug("Prüfung") == _raw.node_slug("Prüfung") == "prüfung"
 
 
 # --- source ids ---

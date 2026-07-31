@@ -1,5 +1,5 @@
 ---
-id: verben-mit-praepositionen
+id: verben-mit-präpositionen
 title_de: Verben mit Präpositionen
 title_en: Verbs with specific prepositions
 type: grammar

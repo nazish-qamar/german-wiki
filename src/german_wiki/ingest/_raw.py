@@ -71,21 +71,56 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def slugify(text: str, *, max_length: int = 40, fallback: str = "quelle") -> str:
-    """Lowercase ASCII slug, German-aware (ä->ae, ß->ss), safe as a filename stem.
+def _slug(text: str, *, max_length: int, fallback: str) -> str:
+    """Shared core: lowercase, non-alphanumerics to hyphens, collapse and trim.
 
-    Reproduces the hand-authored seed convention: ``Wechselpräpositionen`` ->
-    ``wechselpraepositionen``. Used for both source ids and node ids.
+    ``str.isalnum()`` is already true for ``ä``/``ö``/``ü``/``ß``, so what separates the
+    two public slug functions below is only what they do *before* this runs.
+    """
+    out = [ch if ch.isalnum() else "-" for ch in text.lower()]
+    slug = "-".join(part for part in "".join(out).split("-") if part)
+    return slug[:max_length].strip("-") or fallback
+
+
+def slugify(text: str, *, max_length: int = 40, fallback: str = "quelle") -> str:
+    """Lowercase **ASCII** slug, German-aware (ä->ae, ß->ss). For SOURCE ids only.
+
+    Source ids are opaque machine provenance handles -- they carry a content hash and
+    name a file in ``/raw``, which SPEC §1.2 makes immutable and append-only. Nobody
+    reads them as German, nobody renames them, and keeping them ASCII avoids ever
+    having to (ADR-012).
+
+    Node ids took the opposite decision and use ``node_slug``; see ADR-012 for why the
+    two identifier types deliberately differ.
     """
     for source, replacement in _TRANSLITERATIONS.items():
         text = text.replace(source, replacement)
     # Strip any remaining diacritics rather than dropping the letters entirely.
     text = unicodedata.normalize("NFKD", text)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return _slug(text, max_length=max_length, fallback=fallback)
 
-    out = [ch if ch.isalnum() else "-" for ch in text.lower()]
-    slug = "-".join(part for part in "".join(out).split("-") if part)
-    return slug[:max_length].strip("-") or fallback
+
+def node_slug(text: str, *, max_length: int = 60, fallback: str = "konzept") -> str:
+    """Lowercase slug preserving real German. For NODE ids (ADR-012).
+
+    ``Wechselpräpositionen`` -> ``wechselpräpositionen``, not ``wechselpraepositionen``.
+    A node id is human-facing: it is the filename Obsidian shows as the note's name in
+    the sidebar and graph, the value that appears in ``links: target:``, and what you
+    type into ``gw review``. Transliterating it loses the actual word for no benefit in
+    a UTF-8 toolchain.
+
+    **NFC normalization is the load-bearing line here.** ``ä`` has two encodings --
+    precomposed U+00E4 and decomposed U+0061 U+0308 -- which are indistinguishable on
+    screen but are different bytes, hence different filenames. macOS stores filenames
+    NFD while Linux and Windows use NFC, so without this a title arriving in one form
+    would spawn a second node for a word that already has one. That is exactly the
+    fragmentation ADR-006 exists to prevent, and it is the reason ASCII slugs were
+    defensible in the first place; normalizing removes the hazard rather than dodging it.
+    """
+    return _slug(
+        unicodedata.normalize("NFC", text), max_length=max_length, fallback=fallback
+    )
 
 
 def raw_paths(source_id: str, *, raw_dir: Path | str | None = None) -> tuple[Path, Path]:

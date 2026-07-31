@@ -30,7 +30,7 @@ def test_prefix_an_absent_optionals(seed_nodes):
 
 def test_present_empty_vs_absent_themes(seed_nodes):
     """wechsel has `themes: []` (present-empty); prefix-an has none (absent)."""
-    assert seed_nodes["wechselpraepositionen"].themes == []
+    assert seed_nodes["wechselpräpositionen"].themes == []
     assert seed_nodes["prefix-an"].themes is None
 
 

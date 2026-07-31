@@ -79,13 +79,13 @@ def test_set_meta_upserts(tmp_nodes, tmp_db):
 @pytest.mark.parametrize(
     "filt,expected",
     [
-        ({"type": "grammar"}, ["wechselpraepositionen"]),
+        ({"type": "grammar"}, ["wechselpräpositionen"]),
         ({"type": "vocab"}, ["familie-waschen"]),
         ({"type": "pattern"}, ["prefix-an"]),
         ({"type": "phrase"}, ["um-hilfe-bitten"]),
         (
             {"cefr": "A2"},
-            ["familie-waschen", "prefix-an", "um-hilfe-bitten", "wechselpraepositionen"],
+            ["familie-waschen", "prefix-an", "um-hilfe-bitten", "wechselpräpositionen"],
         ),
         ({"cefr": "B1"}, []),
         ({"theme": "küche"}, ["familie-waschen"]),

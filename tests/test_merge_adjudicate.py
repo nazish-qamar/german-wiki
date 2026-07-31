@@ -180,7 +180,7 @@ def test_both_sides_are_labelled_a_and_b() -> None:
 def test_the_few_shot_does_not_teach_the_live_test_pair() -> None:
     """Test integrity: the live test asserts generalization, not prompt recall.
 
-    ADR-010's worked example is ``um-hilfe-bitten`` ↔ ``verben-mit-praepositionen``
+    ADR-010's worked example is ``um-hilfe-bitten`` ↔ ``verben-mit-präpositionen``
     resolving to ``governs``, and tests/test_merge_live.py asserts exactly that against
     the real provider. Few-shotting the model on that pair would make the live test
     measure whether it can copy an answer out of its own prompt. Shot 3 is deliberately

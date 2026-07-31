@@ -28,7 +28,7 @@ from .. import config, storage
 from ..logutil import get_logger
 from ..models import Node
 from ._extract import Candidate
-from ._raw import slugify
+from ._raw import node_slug
 
 logger = get_logger(__name__)
 
@@ -63,10 +63,13 @@ def taken_ids(
 def node_id_for(title_de: str, *, taken: set[str]) -> str:
     """A unique, filename-safe id for a candidate title.
 
+    Preserves German (ADR-012): ``Wechselpräpositionen`` -> ``wechselpräpositionen``.
+    Source ids take the opposite decision and stay ASCII -- see ``_raw.slugify``.
+
     Collisions get ``-2``, ``-3``, … rather than overwriting. ``taken`` is mutated
     so a batch de-collides against itself as well as against what already exists.
     """
-    base = slugify(title_de, max_length=60, fallback="konzept")
+    base = node_slug(title_de)
     candidate = base
     suffix = 1
     while candidate in taken:

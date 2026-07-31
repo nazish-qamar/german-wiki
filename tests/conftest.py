@@ -41,7 +41,7 @@ SEED_IDS = [
     "familie-waschen",
     "prefix-an",
     "um-hilfe-bitten",
-    "wechselpraepositionen",
+    "wechselpräpositionen",
 ]
 
 # The frozen corpus. Copied from the hand-authored seeds at the point slice 5 made
