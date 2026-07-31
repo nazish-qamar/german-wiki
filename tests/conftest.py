@@ -1,7 +1,24 @@
-"""Shared fixtures. The four seed nodes in /nodes are the primary fixtures.
+"""Shared fixtures. The four hand-authored seed nodes are the primary fixtures.
 
-Tests only READ the real /nodes and /vocab; anything mutable (DB, appended
-vocab, touched files) is done against tmp copies so the repo is never altered.
+They live in ``tests/fixtures/nodes``, **not** in the repo's ``/nodes``, and that
+separation became load-bearing in slice 5.
+
+Slices 1-4 could safely treat ``/nodes`` as a fixed four-node corpus, because ADR-003
+meant nothing was allowed to write there. ``gw review`` is the first code that does, so
+``/nodes`` is now a *living wiki* that grows every time a proposal is approved. Tests
+asserting on its exact contents would break on every study session -- and re-pinning
+them to a fifth node, then a sixth, only defers the breakage by one.
+
+So the split is: **the app reads the real ``/nodes``; the tests read a frozen copy.**
+ADR-010's threshold calibration ("the four seeds report zero pairs") keeps its meaning
+precisely because the set can no longer shift underneath it.
+
+One deliberate exception: ``test_merge_live.py`` reaches for the live ``/nodes`` and
+``/queue`` on purpose -- it asserts against real ingested material, and is gated behind
+``GW_LIVE_TESTS=1`` for exactly that reason.
+
+Tests only READ the fixtures and /vocab; anything mutable (DB, appended vocab,
+touched files) is done against tmp copies so the repo is never altered.
 """
 
 from __future__ import annotations
@@ -27,11 +44,20 @@ SEED_IDS = [
     "wechselpraepositionen",
 ]
 
+# The frozen corpus. Copied from the hand-authored seeds at the point slice 5 made
+# /nodes mutable; it is a test asset now and should change only when a test needs it to.
+SEED_DIR = Path(__file__).parent / "fixtures" / "nodes"
+
 
 @pytest.fixture
 def nodes_dir() -> Path:
-    """The real /nodes directory (read-only in tests)."""
-    return config.NODES_DIR
+    """The frozen seed corpus (read-only in tests) -- NOT the live ``/nodes``.
+
+    Everything derived from this fixture (``seed_paths``, ``seed_nodes``,
+    ``tmp_nodes``) inherits the isolation, which is why repointing it here was the
+    whole change.
+    """
+    return SEED_DIR
 
 
 @pytest.fixture
