@@ -4,7 +4,7 @@ title_de: Verben mit Präpositionen
 title_en: Verbs with specific prepositions
 type: grammar
 cefr: B1
-cefr_basis: llm:extraction; Memorizing verb-preposition combinations and their required cases
+cefr_basis: llm:tiebreak(B1); grammar:akkusativ(A2,body); lexical:none
 register:
 - büro
 - formell
@@ -14,8 +14,8 @@ source_ids:
 - 20260726-test-buero-90458c3d
 confidence: 0.9
 status: draft
-version: 1
-updated_at: '2026-07-26T17:44:03.289102+00:00'
+version: 2
+updated_at: '2026-08-01T21:43:27.423789+00:00'
 ---
 
 Some German verbs require specific prepositions, which in turn determine the case of the following noun. The text highlights three important examples:
