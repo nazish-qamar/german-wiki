@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,6 +37,18 @@ from openai.types.chat.chat_completion import Choice
 from openai.types.completion_usage import PromptTokensDetails
 
 from german_wiki import config, storage
+
+# Rich colourizes when FORCE_COLOR is set in the caller's environment, wrapping every
+# number and path in ANSI escapes -- so `assert "Indexed 4 nodes" in result.stdout` fails
+# against `Indexed \x1b[1;36m4\x1b[0m nodes` even though the output is correct. Sixteen CLI
+# tests broke this way when the surrounding terminal happened to export FORCE_COLOR=3.
+#
+# Set at import time, not in a fixture, because conftest is imported before the test
+# modules that construct Rich Consoles at import. The CLI tests assert on textual content,
+# never on presentation, so pinning colour off is the honest fix rather than teaching each
+# assertion to strip escapes.
+os.environ.pop("FORCE_COLOR", None)
+os.environ.setdefault("NO_COLOR", "1")
 
 SEED_IDS = [
     "familie-waschen",
