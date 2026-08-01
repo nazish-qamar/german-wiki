@@ -11,11 +11,6 @@ dist/
 # logs/* rather than logs/: git cannot re-include a file whose parent directory
 # is excluded, and llm_usage.jsonl is the tracked cost ledger (SPEC §10).
 logs/*
-!logs/llm_usage.jsonl
-# decisions.jsonl is tracked for a stronger reason than the cost ledger: it is
-# the authoritative regeneration count behind the SPEC §12.1 merge cap. Losing
-# llm_usage.jsonl costs a statistic; losing this one would disarm a safety guard
-# (ADR-011), so git is its recovery path.
 !logs/decisions.jsonl
 data/*.db
 .cache/
