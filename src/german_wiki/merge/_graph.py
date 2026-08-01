@@ -18,11 +18,15 @@
              END                │
                                 │
                               route    conditional on kind
-                 ┌────────┬─────┴────┬─────────┐
-               merge     link      create    discard
-                 └────────┴────┬─────┴─────────┘
-                              END
+              ┌────────┬─────┬───┴───┬─────────┐
+            merge     link  create relevel  discard
+              └────────┴─────┴───┬───┴─────────┘
+                                END
 ```
+
+``relevel`` (slice 6) rewrites ``cefr``/``cefr_basis`` only; it joins here rather than
+getting its own command-with-a-write because ADR-003 gates writes to ``/nodes``, and one
+review queue is the whole point.
 
 **The propose pass has no edge to any apply node.** ``adjudicate`` ends at ``END``, and the
 only way into ``route`` is to enter the graph with a human decision already in the state --
@@ -504,7 +508,7 @@ def _route(state: MergeState) -> str:
     if not decision.get("approved"):
         return "discard"
     kind = (decision.get("proposal") or {}).get("kind", "discard")
-    return kind if kind in ("merge", "link", "create") else "discard"
+    return kind if kind in ("merge", "link", "create", "relevel") else "discard"
 
 
 def _decided(state: MergeState) -> tuple[Proposal, bool]:
@@ -555,6 +559,20 @@ def create_apply_node(state: MergeState, runtime: Runtime[Context]) -> dict:
     }
 
 
+def relevel_apply_node(state: MergeState, runtime: Runtime[Context]) -> dict:
+    ctx = runtime.context
+    proposal, _ = _decided(state)
+    return {
+        "result": _apply.apply_relevel(
+            proposal,
+            nodes_dir=ctx.nodes_dir,
+            vocab_dir=ctx.vocab_dir,
+            decisions_log=ctx.decisions_log,
+            now=ctx.stamp(),
+        ).model_dump()
+    }
+
+
 def discard_apply_node(state: MergeState, runtime: Runtime[Context]) -> dict:
     ctx = runtime.context
     proposal, approved = _decided(state)
@@ -592,6 +610,7 @@ def build_graph():
     builder.add_node("merge", merge_apply_node)
     builder.add_node("link", link_apply_node)
     builder.add_node("create", create_apply_node)
+    builder.add_node("relevel", relevel_apply_node)
     builder.add_node("discard", discard_apply_node)
 
     builder.add_conditional_edges(START, _entry, {"extract": "extract", "route": "route"})
@@ -604,9 +623,15 @@ def build_graph():
     builder.add_conditional_edges(
         "route",
         _route,
-        {"merge": "merge", "link": "link", "create": "create", "discard": "discard"},
+        {
+            "merge": "merge",
+            "link": "link",
+            "create": "create",
+            "relevel": "relevel",
+            "discard": "discard",
+        },
     )
-    for node in ("merge", "link", "create", "discard"):
+    for node in ("merge", "link", "create", "relevel", "discard"):
         builder.add_edge(node, END)
 
     return builder.compile(checkpointer=InMemorySaver())

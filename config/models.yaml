@@ -99,6 +99,26 @@ steps:
     max_tokens: 4096
     fallback: { provider: deepseek, model: deepseek-chat }
 
+  cefr_tiebreak: # SPEC §5 signal 3 -- the LAST resort, not the default. Slice 6.
+    # CEFR is rules-first: the grammar map (§5 signal 2) and the wordlist (signal 1) are
+    # pure lookups and cost nothing. This step fires ONLY when those two conflict or are
+    # both silent, and the prompt is handed their results rather than asked cold -- §5 is
+    # explicit that a zero-shot CEFR judgment is inconsistent across sessions.
+    #
+    # Deliberately glm-4.5-flash and NOT the adjudication step's glm-4.6. Adjudication is
+    # a per-pair judgment worth paying for; a tiebreak can fire on every node that lacks a
+    # grammar match, so it must stay free. It is also the least-grounded signal in the
+    # system, which is a reason to spend less on it, not more.
+    #
+    # Until vocab/cefr/ holds a real wordlist, pure-vocabulary nodes have no lexical
+    # anchor and no grammar structure, so they all land here. Those levels are findable
+    # with `grep -l 'cefr_basis: llm:tiebreak' nodes/` -- the successor to slice 3's
+    # `llm:extraction` grep habit (ADR-009), and the reason the marker stays greppable.
+    status: active
+    model: glm-4.5-flash
+    max_tokens: 2048
+    fallback: { provider: deepseek, model: deepseek-chat }
+
   vision: # SPEC §9 -- image/PDF OCR. Slice 8.
     status: planned
     model: glm-4.5v

@@ -12,3 +12,36 @@ register:
   umgangssprache: umgangssprachlich
   informell: umgangssprachlich
   schriftsprache: schriftlich
+  # --- SPEC §6.2 dimensions: spelling/language variants only ---
+  # formality
+  du-form: du-ebene
+  du-ebene-informell: du-ebene
+  duzen: du-ebene
+  sie-form: sie-ebene
+  siezen: sie-ebene
+  # domain. Behördendeutsch gets its own tag: §6.2 calls it a genuinely distinct
+  # sublanguage (Nominalstil, passive, *hiermit*, *Antragsteller*), not a formality level.
+  behoerde: behörde
+  amt: behörde
+  amtsdeutsch: behörde
+  behördendeutsch: behörde
+  beruf: büro
+  akademisch-wissenschaftlich: akademisch
+  # mode
+  mündlich: gesprochen
+  muendlich: gesprochen
+  gesprochene sprache: gesprochen
+  geschriebene sprache: geschrieben
+  # regional
+  deutschland: de
+  österreich: at
+  oesterreich: at
+  schweiz: ch
+  #
+  # NOT aliased, deliberately: `schriftlich` -> `geschrieben`.
+  # SPEC §6.2 names the mode axis gesprochen/geschrieben, and `schriftlich` is the same
+  # concept under a different word — but two existing nodes already carry `schriftlich`,
+  # and an alias rewrites tags on the next write of those files. That is a change to
+  # material you authored, so it is yours to make rather than a side effect of adding
+  # this vocabulary. Add the line if you want them folded; both remain valid tags until
+  # you do.

@@ -1,0 +1,5 @@
+# tiny fixture list -- NOT a real Goethe list, just enough to exercise the lookup
+waschen
+haus
+trinken
+

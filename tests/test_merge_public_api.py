@@ -35,6 +35,8 @@ EXPECTED = {
     "list_proposals",
     "load_proposal",
     "merge_count",
+    "now_iso",
+    "proposal_id",
     "propose_for_source",
     "read_all",
     "regenerate",
@@ -47,7 +49,16 @@ PACKAGE_DIR = config.PROJECT_ROOT / "src" / "german_wiki"
 _PRIVATE_IMPORT = re.compile(r"^\s*(?:from|import)\s+[\w.]*merge\._\w+", re.MULTILINE)
 
 # The single implementation of the routing (ADR-011). Reaching one of these IS the write.
-APPLY_FUNCTIONS = {"apply_merge", "apply_link", "apply_create", "apply_discard"}
+# `apply_relevel` joined in slice 6 and is listed here deliberately: a new apply function
+# that nobody added to this set would be a write path outside the invariant, which is the
+# exact hole this test exists to close.
+APPLY_FUNCTIONS = {
+    "apply_merge",
+    "apply_link",
+    "apply_create",
+    "apply_discard",
+    "apply_relevel",
+}
 
 
 def test_all_matches_the_documented_interface() -> None:

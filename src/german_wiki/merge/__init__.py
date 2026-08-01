@@ -39,6 +39,8 @@ from ._proposal import (
     delete_proposal,
     list_proposals,
     load_proposal,
+    now_iso,
+    proposal_id,
     write_proposal,
 )
 from ._regenerate import MAX_REGENERATIONS, CapCheck, MergedBody, check_cap, regenerate
@@ -69,6 +71,8 @@ __all__ = [
     "list_proposals",
     "load_proposal",
     "merge_count",
+    "now_iso",
+    "proposal_id",
     "propose_for_source",
     "read_all",
     "regenerate",

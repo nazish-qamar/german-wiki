@@ -42,7 +42,11 @@ logger = get_logger(__name__)
 
 # Applied in this order within one review session. Creates first, so a link never
 # references a node that has not landed yet; discards last because they write nothing.
-KIND_ORDER = {"create": 0, "merge": 1, "link": 2, "discard": 3}
+#
+# `relevel` sits AFTER `merge` deliberately: a merge archives its loser to /_merged, and
+# re-levelling a node that has just been archived would fail on the expect_exists check.
+# Ordering it here means one review session can merge a pair and then level the survivor.
+KIND_ORDER = {"create": 0, "merge": 1, "link": 2, "relevel": 3, "discard": 4}
 
 # The trust ladder, and the one rung a machine regeneration knocks a node down.
 #
@@ -379,6 +383,59 @@ def apply_create(
         approved=True,
         written=[node.id],
         decision_id=decision_id,
+    )
+
+
+def apply_relevel(
+    proposal: Proposal,
+    *,
+    nodes_dir: Path | str | None = None,
+    vocab_dir: Path | str | None = None,
+    decisions_log: Path | str | None = None,
+    now: datetime | None = None,
+) -> ApplyResult:
+    """Rewrite ``cefr`` and ``cefr_basis`` on one node (SPEC §5). Nothing else moves.
+
+    Deliberately narrow: the body is untouched, so ``writes_body`` is False for this kind
+    exactly as it is for ``link``. That is what makes the review diff readable — two
+    frontmatter lines, not a whole node.
+
+    **No status demotion**, unlike an OVERLAP merge. ADR-011 §7 demotes ``stable`` ->
+    ``reviewed`` because a regeneration re-encodes the *body* and the reviewer only
+    confirmed a diff of it. Here there is no body change to have degraded, and the
+    reviewer saw the entire change, so the node's trust level is intact.
+    """
+    if not proposal.cefr:
+        raise ApplyError(f"relevel proposal {proposal.id!r} carries no cefr")
+
+    stamp = now or datetime.now(UTC)
+    node = _load_side(proposal, proposal.candidate, nodes_dir)
+    before = (node.cefr, node.cefr_basis)
+
+    releveled = node.model_copy(
+        update={
+            "cefr": proposal.cefr,
+            "cefr_basis": proposal.cefr_basis,
+            # A pipeline write, so version advances -- which also keeps it honest as the
+            # ADR-011 tripwire for "has this node been machine-written before?".
+            "version": (node.version or 1) + 1,
+            "updated_at": stamp,
+        }
+    )
+
+    decision_id = _record(proposal, approved=True, decisions_log=decisions_log, now=stamp)
+    write_approved(releveled, nodes_dir=nodes_dir, vocab_dir=vocab_dir, expect_exists=True)
+
+    logger.info(
+        "releveled %s: %s -> %s (%s)", node.id, before[0], proposal.cefr, proposal.cefr_basis
+    )
+    return ApplyResult(
+        proposal_id=proposal.id,
+        kind="relevel",
+        approved=True,
+        written=[node.id],
+        decision_id=decision_id,
+        note=f"{before[0]} -> {proposal.cefr}",
     )
 
 

@@ -19,6 +19,12 @@ logs/*
 !logs/decisions.jsonl
 data/*.db
 .cache/
+# CEFR wordlists (SPEC §5 signal 1). The lookup code is tracked; the DATA is not --
+# Goethe/DWDS lists carry licensing this repo cannot redistribute, so anything dropped
+# here stays local. `*.txt` deliberately does not match vocab/cefr/README.md, which stays
+# tracked and is what keeps the directory present on a fresh clone (so no .gitkeep and no
+# `!` negation are needed). Absent lists are a supported state, not a broken one.
+vocab/cefr/*.txt
 # Staging for ingested candidates awaiting `gw promote` (ADR-003). Not a durable
 # artifact -- /raw and /nodes are the tracked record.
 queue/

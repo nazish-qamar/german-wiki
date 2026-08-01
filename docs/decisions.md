@@ -674,3 +674,169 @@ asserts the divergence directly so a well-meaning unification fails loudly.
   notes wrong.
 - *Deferring the migration* — the rename is free only while no `links: target:` points at
   a changing slug. That window closes as soon as the wiki cross-references itself.
+
+---
+
+## ADR-013 — Slice 6: CEFR is rules-first, and the wordlist ships as a seam with no data
+
+**Decided:** SPEC §5's three signals, in strict precedence, plus §6.2's register
+vocabulary. Seven things worth not re-litigating.
+
+**1. The lexical anchor ships as working code with no wordlist.** `vocab/cefr/a1.txt …
+c2.txt`, one lemma per line — the shape a real Goethe or DWDS list drops straight into.
+Missing files, empty files and blank lines are all "no signal", never an error.
+
+**No hand-written starter list.** A CEFR list written from recollection is exactly the
+unreliable per-item judgment SPEC §5 introduces the rules approach to *replace*, and it
+would put unearned confidence into `cefr_basis` where nobody could audit it. The project
+already applies this rule to model prices (ADR-008 §4: a wrong rate is worse than a
+visible gap); a wrong level is worse, because it silently reorders study.
+
+**The data is gitignored, the directory is not.** Real lists carry licensing this repo
+cannot redistribute, so `.gitignore` excludes `vocab/cefr/*.txt` while
+`vocab/cefr/README.md` stays tracked — which is *also* what keeps the directory present on
+a fresh clone. **No `.gitkeep` and no `!` negation are needed**, because `*.txt` does not
+match `README.md`. Verified: `git check-ignore` catches `a1.txt`, and `git add -An
+vocab/cefr/` adds only the README.
+
+Tests read `tests/fixtures/cefr/` (committed), never `vocab/cefr/`. A test reading the real
+directory would pass only on a machine that happens to have a list installed.
+
+**Consequence, stated plainly:** until a real list exists, only *title-anchored* grammar
+nodes level from rules. On the live corpus that is one node of five; the other targets
+reach the tiebreak. Adding a list later is zero code change.
+
+**2. Grammar hits are graded by where they matched, and this is load-bearing.** SPEC §5's
+table is a lookup, but *matching a node to a row* is an interpretation. The naive
+whole-node keyword sweep mislevels, and the live corpus proves it: `verben-mit-präpositionen`
+is B1 and its body mentions *Akkusativ*, which §5 puts at A2 — a flat sweep proposes
+**B1 → A2** and relabels a B1 rule as beginner material.
+
+So a hit in `title_de` says what the node *is about* and decides; a hit in `body_md` says
+what it *mentions* and is weak evidence. A body-only hit that disagrees with the node's
+current level goes to the tiebreak rather than overriding it. Title hits shadow body hits
+entirely rather than being weighted — averaging them would produce a level neither signal
+supports.
+
+Two matching details with tests: **`Konjunktiv II` is protected from `Konjunktiv I` by a
+negative lookahead, not by list ordering** (ordering works only until someone re-sorts the
+table); and matching anchors at the start of a word but not the end, so `Akkusativobjekt`
+counts as *Akkusativ* while `Plusquamperfekt` correctly matches nothing, since it is not in
+§5's table.
+
+**3. `gw relevel` writes through the `/proposals` queue as a fifth proposal kind.** Not
+directly to `/nodes`, and **no `--write` flag** — that is the batch-write-unreviewed pattern
+ADR-009 already rejected. Determinism of the lookup does not exempt it: ADR-003 gates
+writes to `/nodes`, not uncertain judgments, and `cefr` drives SPEC §5.1's priority score,
+so a bad relevel reorders what you learn. If high-volume re-levelling later needs speed,
+add batch *approval* on top of the queue (approve-all-where-`basis: rules`), never a bypass.
+
+`relevel` is ordered **after `merge`** in `KIND_ORDER`, because a merge archives its loser
+and re-levelling an archived node would fail the `expect_exists` check.
+
+**No status demotion.** ADR-011 §7 demotes `stable → reviewed` on OVERLAP because the
+*body* was re-encoded and the reviewer only confirmed a diff of it. A relevel rewrites two
+frontmatter fields and the reviewer saw the entire change, so trust is intact — same
+reasoning as an approved link.
+
+**4. `cefr_basis` is `signal:detail(LEVEL)`, semicolon-separated.** Formalizing the loose
+convention the hand-authored seeds already used. The tiebreak records *what it was shown*,
+not merely what it said:
+
+```
+grammar:wechselpräposition(A2)
+grammar:wechselpräposition(A2); goethe:a2(helfen)
+llm:tiebreak(B1); grammar:akkusativ(A2,body); lexical:none
+```
+
+**`llm:tiebreak` stays greppable on purpose** — it is the successor to slice 3's
+`llm:extraction` marker (ADR-009), so `grep -l 'cefr_basis: llm:tiebreak' nodes/` remains
+the one command that finds the least-grounded levels in the wiki. This matters more than it
+looks: a tiebreak level is indistinguishable from a grammar-anchored one in the file unless
+you read the basis, and until a wordlist exists every pure-vocabulary node has one.
+
+**A derived `llm:tiebreak` basis is NOT a placeholder**, so re-running does not re-target
+it. A *missing* basis is, because SPEC §5 says always store one.
+
+**5. Hand-authored bases are not touched by default.** `freq:high; goethe:A1(waschen)` on a
+seed node is human judgment, and recording it is the entire reason `cefr_basis` exists.
+`--all` overrides this and is opt-in for exactly that reason.
+
+**An ABSENT basis and a PLACEHOLDER basis are different facts, and conflating them inverts
+the slice.** Both are *targeted* — SPEC §5 says always store a basis, so a node without one
+has an unexplained level either way. But only one of them licenses changing the level:
+
+- `cefr_basis: llm:extraction…` — the **level itself** was a machine guess, so the tiebreak
+  may move it.
+- `cefr_basis` absent **and both anchors silent** — only the *explanation* is missing. The
+  level may well be a human's, and a tiebreak running on `grammar:none; lexical:none` has
+  strictly **less** information than whoever set it. So the level is kept and the basis is
+  recorded as `human:seed`. **The tiebreak explains; it never moves.**
+
+This was caught by running the slice against the live corpus, not by reasoning: `prefix-an`
+is a hand-authored A2 seed with no basis, and the first implementation proposed **A2 → B1**
+purely because the explanation field was empty. Overwriting a human's level on zero
+evidence is precisely what a rules-first design exists to prevent, and the review gate
+catching it is not good enough — it would recur on every seed node and train the reviewer
+to skim.
+
+The protection is narrow on purpose: it applies only when the rules are *silent*. A real
+grammar anchor still outranks an unexplained level, and `human:seed` is not a placeholder,
+so re-running converges instead of re-deriving forever.
+
+**6. The tiebreak runs on free `glm-4.5-flash`, never the paid `glm-4.6`.** Adjudication is
+a per-pair judgment worth paying for; a tiebreak can fire on *every* node lacking a grammar
+match. It is also the least-grounded signal, which argues for spending less on it, not
+more. Same limited judgment quality ADR-011 §5 measured on adjudication applies here — the
+mitigation is the wordlist, which anchors vocabulary nodes and stops them reaching the
+tiebreak at all.
+
+**7. Register gains SPEC §6.2's dimensions; examples are NOT parsed out of `body_md`.**
+`vocab/registers.txt` gains formality (`du-ebene`, `sie-ebene`, `neutral`), domain
+(`behörde`, `akademisch`, `medien`), mode (`gesprochen`, `geschrieben`) and regional
+(`de`, `at`, `ch`), with aliases folding spelling variants. Behördendeutsch gets its own
+domain tag, which §6.2 calls out as a genuinely distinct sublanguage rather than a
+formality level.
+
+**`Example.register` stays reserved and unpopulated, deliberately.** Parsing the
+`## Examples` bullets out of `body_md` into the structured field is a body-format migration
+with a dual-source-of-truth question — and slice 5's merge regeneration rewrites `body_md`
+knowing nothing about an `examples:` field, so the two would drift on the first merge. It
+belongs in its own slice. Node-level tags are the interim mechanism; the empty field is
+intentional, not forgotten.
+
+**`schriftlich → geschrieben` was deliberately NOT aliased.** §6.2 names the mode axis
+`gesprochen`/`geschrieben`, and `schriftlich` is the same concept under a different word —
+but two existing nodes already carry `schriftlich`, and an alias rewrites their tags on the
+next write. That is a change to hand-authored material, so it is the author's call rather
+than a side effect of adding vocabulary. Both remain valid tags until someone decides.
+
+**No second `learn=True` path.** Ingest stages with `learn=False`; the vocabulary grows only
+at `write_approved` (ADR-007). The existing AST test pins this and stayed green unchanged
+through the whole slice.
+
+**Also:** the extraction prompt bumped to `extract@2` to name §6.2's dimensions. That
+orphans two cached *extraction* entries on free flash and **provably does not touch the
+paid glm-4.6 adjudication cache** — prompt versions are per-`Prompt` module constants and
+the messages differ entirely, verified by recomputing an adjudication cache key across the
+bump and getting a byte-identical hash (ADR-008 §1 is what makes per-step invalidation
+independent).
+
+**Priority scoring (SPEC §5.1) is deferred.** SPEC §11 already places it at slice 9+, and
+its `freq_rank_score` term depends on the wordlist deferred in point 1. Building it now
+would ship a formula with a constant standing in for its main input.
+
+**Rejected:**
+- *A hand-written starter wordlist* — unauditable guesses in the one field that exists to
+  make levels auditable.
+- *Committing a real Goethe/DWDS list* — licensing this repo cannot redistribute.
+- *`gw relevel --write`* — the batch-write-unreviewed pattern ADR-009 turned down, and the
+  level it writes drives study order.
+- *Folding re-levelling into `gw reindex`* — reindex rebuilds the derived index and must
+  never write to `/nodes` (ADR-001).
+- *A flat keyword sweep over title + body* — demonstrably downgrades `verben-mit-präpositionen`
+  from B1 to A2 on a passing mention.
+- *Ordering the grammar table so `Konjunktiv II` precedes `Konjunktiv I`* — works until the
+  table is re-sorted; a negative lookahead does not.
+- *Parsing examples into `Node.examples` this slice* — dual source of truth, and slice 5's
+  regeneration would drift from it immediately.

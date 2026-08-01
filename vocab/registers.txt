@@ -3,3 +3,14 @@ büro
 formell
 schriftlich
 umgangssprachlich
+du-ebene
+sie-ebene
+neutral
+behörde
+akademisch
+medien
+gesprochen
+geschrieben
+de
+at
+ch

@@ -20,7 +20,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import config, embed, index, ingest, llm, merge, storage, vocab
+from . import config, embed, index, ingest, level, llm, merge, storage, vocab
 from .db import connect
 
 app = typer.Typer(add_completion=False, help="German Wiki — node layer CLI.")
@@ -699,6 +699,84 @@ def adjudicate(
         "[dim]Nothing written to /nodes.[/] Every proposal — merges and links alike — "
         "needs your approval: run [bold]gw review[/]"
     )
+
+
+@app.command()
+def relevel(
+    everything: bool = typer.Option(
+        False, "--all", help="Re-derive every node, including hand-authored bases."
+    ),
+    no_llm: bool = typer.Option(
+        False, "--no-llm", help="Rules only; report anything the tiebreak would decide."
+    ),
+    nodes_dir: Path = typer.Option(config.NODES_DIR, "--nodes-dir", help="Node directory."),
+    proposals_dir: Path = typer.Option(
+        config.PROPOSALS_DIR, "--proposals-dir", help="Pending proposals."
+    ),
+    cefr_dir: Path = typer.Option(config.CEFR_DIR, "--cefr-dir", help="CEFR wordlists."),
+    cache_dir: Path = typer.Option(config.CACHE_DIR, "--cache-dir", help="Cache root."),
+) -> None:
+    """Re-derive CEFR levels from rules (SPEC §5). Writes NOTHING to /nodes."""
+    if not level.available(cefr_dir):
+        # Not a warning -- it is the shipped state. But it changes what the run can do,
+        # so say it rather than letting levels quietly come from the model.
+        console.print(
+            f"[dim]No CEFR wordlist in {cefr_dir} — the lexical anchor is inactive, so "
+            f"nodes with no grammar match fall to the tiebreak. See "
+            f"{cefr_dir / 'README.md'}[/]"
+        )
+
+    try:
+        result = level.relevel(
+            nodes_dir=nodes_dir,
+            proposals_dir=proposals_dir,
+            cefr_dir=cefr_dir,
+            everything=everything,
+            allow_llm=not no_llm,
+            cache_dir=cache_dir,
+        )
+    except (level.TiebreakError, ValueError) as exc:
+        err_console.print(f"[red]{exc}[/]")
+        if isinstance(exc, level.TiebreakError) and exc.reasoning_content:
+            excerpt = exc.reasoning_content.strip().replace("\n", " ")[:300]
+            err_console.print(f"[dim]Model reasoning began: {excerpt}…[/]")
+        raise typer.Exit(code=1) from None
+
+    if not result.considered:
+        console.print("Nothing to re-level — every node has a grounded cefr_basis.")
+        return
+
+    if result.proposals:
+        table = Table(show_lines=False)
+        for col in ("node", "from", "to", "basis", "how"):
+            table.add_column(col)
+        for p in result.proposals:
+            current = storage.load_node(nodes_dir / f"{p.candidate}.md").cefr
+            moved = current != p.cefr
+            table.add_row(
+                p.candidate,
+                current,
+                f"[bold]{p.cefr}[/]" if moved else p.cefr,
+                p.cefr_basis or "—",
+                "model" if level.FLAG_TIEBREAK in p.flags else "rules",
+            )
+        console.print(table)
+
+    console.print(
+        f"[bold]{len(result.proposals)}[/] proposal(s) from {result.considered} "
+        f"node(s) -> [dim]{proposals_dir}[/]"
+    )
+    for node_id in result.unchanged:
+        console.print(f"[dim]{node_id}: already correct, nothing proposed[/]")
+    for node_id in result.unresolved:
+        # Honest gap rather than a guessed level -- the whole point of the slice.
+        err_console.print(
+            f"[yellow]{node_id}:[/] no rule matched and the tiebreak was disabled"
+        )
+    if result.proposals:
+        console.print(
+            "[dim]Nothing written to /nodes.[/] Approve with [bold]gw review[/]"
+        )
 
 
 @app.command()

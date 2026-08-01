@@ -38,7 +38,13 @@ MAX_CANDIDATES = 8
 
 # Enters the cache key, so bumping it re-runs extraction without touching a word
 # of prompt text -- use it when THIS parser changes what it expects back.
-PROMPT_VERSION = "extract@1"
+#
+# @2 (slice 6): the register field now names SPEC §6.2's four dimensions. Bumping this
+# orphans cached extractions, which is intended -- a cached response predates the new
+# instruction and would carry the old flat tags. Scoped to extraction only: adjudication
+# and merge carry their own PROMPT_VERSION and their own cache keys (ADR-008 §1), so the
+# paid glm-4.6 adjudication cache is untouched. Re-extraction runs on free flash.
+PROMPT_VERSION = "extract@2"
 
 STEP = "extraction"
 
@@ -116,8 +122,14 @@ For each candidate:
 - type: one of grammar, vocab, phrase, pattern, culture
 - cefr: a single level A1-C2, your best estimate
 - cefr_basis: one short phrase saying what drove that level
-- register: situational registers, lowercase German (alltag, büro, formell, \
-umgangssprachlich, schriftlich); omit if unclear
+- register: lowercase German tags along up to four dimensions; omit any you cannot tell \
+from the source. Do NOT guess a dimension the text does not show.
+    formality: du-ebene, sie-ebene, neutral
+    domain: alltag, büro, behörde, akademisch, medien
+    mode: gesprochen, geschrieben
+    regional: de, at, ch
+  Use "behörde" for official/administrative German (Nominalstil, passive constructions, \
+*hiermit*, *Antragsteller*) — it is a distinct sublanguage, not merely a formal tone.
 - themes: situational themes, lowercase German (küche, büro, arzt, amt, café); \
 omit if unclear
 - body_md: a compact Markdown explanation. State the rule or meaning, then any \

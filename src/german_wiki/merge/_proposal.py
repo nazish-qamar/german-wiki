@@ -41,7 +41,13 @@ from ._ledger import Kind
 # MANUAL is not a model outcome -- it is what the regeneration cap emits when a merge is
 # refused (SPEC §12.1). It reaches review so the refusal is visible and actionable rather
 # than a pair that silently stops being proposed.
-ProposalOutcome = Literal["SAME", "OVERLAP", "DISTINCT_RELATED", "DISTINCT", "MANUAL"]
+#
+# RELEVEL (slice 6) is likewise not an adjudication outcome: it is a CEFR re-derivation
+# (SPEC §5) riding the same queue, because ADR-003 gates every write to /nodes and a level
+# change drives §5.1's study order.
+ProposalOutcome = Literal[
+    "SAME", "OVERLAP", "DISTINCT_RELATED", "DISTINCT", "MANUAL", "RELEVEL"
+]
 
 # Flags surfaced in the review diff. Advisory: they aim attention, they do not veto.
 FLAG_UNSOURCED = "unsourced-examples"
@@ -64,6 +70,8 @@ _ORDER = [
     "loser",
     "relation",
     "direction",
+    "cefr",
+    "cefr_basis",
     "similarity",
     "tier",
     "band",
@@ -87,9 +95,12 @@ class Proposal(BaseModel):
     id: str
     kind: Kind
     outcome: ProposalOutcome
-    # "llm" when a model decided, "threshold" when the >= GRAY_HIGH band did. A threshold
-    # verdict is cheaper, not lighter: ADR-003 means it still cannot write without review.
-    basis: Literal["llm", "threshold"] = "llm"
+    # How the proposal was reached: "llm" when a model decided, "threshold" when the
+    # >= GRAY_HIGH similarity band did, "rules" when a pure lookup did (SPEC §5's grammar
+    # map). None of these is lighter than the others -- ADR-003 means a proposal cannot
+    # write without review however it was produced. They only record what it cost and how
+    # much to trust it.
+    basis: Literal["llm", "threshold", "rules"] = "llm"
 
     source_id: str | None = None
     candidate: str  # the B side: the node under consideration
@@ -100,6 +111,11 @@ class Proposal(BaseModel):
 
     relation: str | None = None  # link only
     direction: str | None = None  # link only
+
+    # relevel only (slice 6): the derived level and the evidence behind it. Named for the
+    # Node fields they replace, so the review diff reads as the frontmatter change it is.
+    cefr: str | None = None
+    cefr_basis: str | None = None
 
     similarity: float | None = None
     tier: str | None = None

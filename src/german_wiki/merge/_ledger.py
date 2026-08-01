@@ -43,7 +43,11 @@ from .. import config
 # regeneration is a lossy re-encoding".
 REGENERATING_OUTCOMES = frozenset({"OVERLAP"})
 
-Kind = Literal["merge", "link", "create", "discard"]
+# `relevel` (slice 6) rewrites cefr + cefr_basis and nothing else. It is a proposal kind
+# rather than its own command-with-a-write because ADR-003 gates writes to /nodes, not
+# uncertain judgments -- and matching a node to a SPEC §5 grammar row is an interpretation
+# that can be wrong, even though the level lookup that follows is a table read.
+Kind = Literal["merge", "link", "create", "discard", "relevel"]
 
 
 class LedgerUnreadable(RuntimeError):

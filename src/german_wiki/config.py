@@ -58,3 +58,9 @@ MERGED_DIR = _path_env("GW_MERGED_DIR", PROJECT_ROOT / "_merged")
 # authoritative regeneration count for the SPEC §12.1 drift cap, not just a
 # statistic (ADR-011).
 DECISIONS_LOG_PATH = _path_env("GW_DECISIONS_LOG", LOGS_DIR / "decisions.jsonl")
+
+# --- slice 6: CEFR anchors ---
+# Wordlists for the lexical anchor (SPEC §5 signal 1). The directory is tracked via its
+# README; the *.txt data inside is gitignored because Goethe/DWDS lists cannot be
+# redistributed. Absent lists are a supported state -- see level/_lexical.py.
+CEFR_DIR = _path_env("GW_CEFR_DIR", VOCAB_DIR / "cefr")
