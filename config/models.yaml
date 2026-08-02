@@ -119,6 +119,24 @@ steps:
     max_tokens: 2048
     fallback: { provider: deepseek, model: deepseek-chat }
 
+  transparency: # SPEC §7.4 -- is this word family a scaffold or a coincidence? Slice 7.
+    # The ONE judgment in slice 7 that rules cannot make. Segmentation is mechanical
+    # (a closed prefix inventory plus corpus evidence), but whether `verstehen` really
+    # belongs to `stehen` is semantic: SPEC §7.4 says those meanings "have drifted
+    # centuries past transparency", and no rule sees that.
+    #
+    # Free glm-4.5-flash, same reasoning as cefr_tiebreak above and NOT the paid glm-4.6:
+    # this is a per-candidate call that fires as verbs arrive, and a wrong answer marks a
+    # grid cell rather than corrupting a node body. Two things backstop it -- the review
+    # gate (family_transparency is written to /nodes, so ADR-003 applies) and §7.4's own
+    # rule that "the node holds the truth; the grid only predicts a guess".
+    #
+    # Small budget on purpose: the answer is one enum value and one sentence.
+    status: active
+    model: glm-4.5-flash
+    max_tokens: 1024
+    fallback: { provider: deepseek, model: deepseek-chat }
+
   vision: # SPEC §9 -- image/PDF OCR. Slice 8.
     status: planned
     model: glm-4.5v
