@@ -20,7 +20,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import config, embed, index, ingest, level, llm, merge, storage, vocab
+from . import config, embed, index, ingest, level, llm, merge, morph, storage, vocab
 from .db import connect
 
 app = typer.Typer(add_completion=False, help="German Wiki — node layer CLI.")
@@ -867,7 +867,33 @@ def _show_proposal(proposal: merge.Proposal, *, nodes_dir: Path) -> None:
             console.print(f"[dim]changelog: {proposal.changelog}[/]")
     else:
         console.print()
-        console.print(proposal.body_md.rstrip())
+        # Show the STAGED FILE's current content when there is one, not the proposal's
+        # copy (ADR-011, amended). Review must display what will actually be written, so
+        # an edit made to the queue file since the proposal was created is visible here --
+        # otherwise you approve one thing and get another.
+        console.print(_reviewable_body(proposal).rstrip())
+
+
+def _reviewable_body(proposal: merge.Proposal) -> str:
+    """The content approving this proposal will write.
+
+    For a proposal backed by ``candidate_path`` that file is authoritative; the proposal
+    carries no body at all for those. Falling back to ``body_md`` covers merges (which
+    have no staged file) and proposals written before the amendment.
+    """
+    if proposal.candidate_path:
+        staged = Path(proposal.candidate_path)
+        if staged.is_file():
+            try:
+                return storage.load_node(staged).body_md
+            except (ValueError, OSError):
+                # A hand-edit that broke the file: say so here rather than at apply time,
+                # and show the raw text so the mistake is visible.
+                err_console.print(
+                    f"[yellow]⚠ {staged} does not parse as a node — showing raw text.[/]"
+                )
+                return staged.read_text(encoding="utf-8")
+    return proposal.body_md
 
 
 @app.command()
@@ -965,6 +991,232 @@ def review(
         counts = index.reindex(nodes_dir=nodes_dir, db_path=db)
         console.print(f"[dim]reindexed {counts['nodes']} node(s)[/]")
     console.print(f"[dim]decisions logged to {decisions_log}[/]")
+
+
+# --- slice 7: morphological grids (SPEC §7) ---
+#
+# `gw grid` is the first output of this project that exists for STUDYING rather than for
+# building the wiki, so it is rendered as a study tool: the cell says the word, the colour
+# says what you can do about it, and the legend is phrased as next actions rather than as
+# internal state names.
+
+CELL_STYLE: dict[str, tuple[str, str]] = {
+    # state -> (glyph, rich style)
+    "learned": ("●", "bold green"),
+    "identified": ("◇", "yellow"),
+    "gap": ("·", "dim"),
+    "irregular": ("⚠", "magenta"),
+    "withheld": ("–", "dim italic"),
+}
+
+CELL_MEANING: dict[str, str] = {
+    "learned": "you have this — a family lemma or its own node",
+    "identified": "you named it but have not written it up — [bold]study next[/]",
+    "gap": "nothing here yet — compose it yourself and check it is a word",
+    "irregular": "family meanings have drifted — looks related, may mislead (§7.4)",
+    "withheld": "stress decides separability — no claim made (um-, durch-, über-)",
+}
+
+# Which states may print the word. A cell only spells a word out when something vouches
+# for it: a lemma/node for `learned`, a human's own link for `identified`, a node's
+# `family_transparency` for `irregular`.
+#
+# `gap` deliberately does NOT. The grid computes a full cross-product, and most of it is
+# not German -- `an-` × `waschen` yields `anwaschen`, which is not a word. Printing it in
+# a study tool reads as "learn this". At 1x3 that is a curiosity; at 10x20 it would be
+# ~140 invented vocabulary items burying the real signal. The row and column headers
+# already say what the cell is, and composing it yourself is the exercise -- so the cell
+# shows that it is empty without asserting what would fill it.
+SPELLS_THE_WORD = frozenset({"learned", "identified", "irregular"})
+
+
+def _grid_nodes(nodes_dir: Path) -> list:
+    return storage.load_all_nodes(nodes_dir)
+
+
+@app.command()
+def grid(
+    nodes_dir: Path = typer.Option(config.NODES_DIR, "--nodes-dir", help="Node directory."),
+    words: bool = typer.Option(True, "--words/--glyphs", help="Show words, or glyphs only."),
+) -> None:
+    """The root × prefix grid (SPEC §7). Empty cells are what to learn next."""
+    matrix = morph.build_grid(_grid_nodes(nodes_dir))
+    if matrix.is_empty:
+        console.print(
+            "[dim]No grid yet.[/] It needs at least one prefix node "
+            "([bold]type: pattern[/] with [bold]separable:[/]) and one word family "
+            "([bold]type: vocab[/] with [bold]root:[/])."
+        )
+        return
+
+    table = Table(show_lines=False, title="Root × prefix", title_style="bold")
+    table.add_column("prefix", style="bold")
+    for root in matrix.roots:
+        header = root.root if root.node_id else f"{root.root}*"
+        table.add_column(header)
+
+    for prefix in matrix.prefixes:
+        row = [prefix.label]
+        for root in matrix.roots:
+            cell = matrix.cell(prefix.morpheme, root.root)
+            glyph, style = CELL_STYLE[cell.state]
+            spell = words and cell.state in SPELLS_THE_WORD
+            label = f"{glyph} {cell.word}" if spell else glyph
+            row.append(f"[{style}]{label}[/]")
+        table.add_row(*row)
+    console.print(table)
+
+    counts = {state: len(matrix.by_state(state)) for state in CELL_STYLE}
+    console.print()
+    for state, (glyph, style) in CELL_STYLE.items():
+        if not counts[state]:
+            continue
+        console.print(
+            f"  [{style}]{glyph}[/] {state:<11} [bold]{counts[state]:>3}[/]  "
+            f"[dim]{CELL_MEANING[state]}[/]"
+        )
+    if any(r.node_id is None for r in matrix.roots):
+        console.print(
+            "\n[dim]* this column has no family node yet — it is implied by a prefix "
+            "node's own same_family links.[/]"
+        )
+    if counts["identified"]:
+        console.print(
+            f"\n[yellow]{counts['identified']} word(s) you have already flagged[/] and "
+            "not yet written up. That is the shortest path to a fuller grid."
+        )
+    if counts["withheld"]:
+        # A row of dashes is only useful if it says how to stop being one.
+        stuck = sorted({c.prefix for c in matrix.by_state("withheld")})
+        console.print(
+            f"\n[dim]{', '.join(f'{p}-' for p in stuck)} predicts nothing: stress decides "
+            "whether these separate, and spelling does not carry it. Set [bold]separable:"
+            "[/] on a verb to resolve it — see [bold]gw gaps --ambiguous[/].[/]"
+        )
+
+
+@app.command()
+def gaps(
+    identified: bool = typer.Option(False, "--identified", help="Only links with no node."),
+    ambiguous: bool = typer.Option(False, "--ambiguous", help="Only what needs your call."),
+    nodes_dir: Path = typer.Option(config.NODES_DIR, "--nodes-dir", help="Node directory."),
+) -> None:
+    """What the wiki says is missing (SPEC §7.3). Dangling links are the roadmap."""
+    nodes = _grid_nodes(nodes_dir)
+    show_all = not (identified or ambiguous)
+
+    if identified or show_all:
+        dangling = morph.dangling_targets(nodes)
+        if dangling:
+            table = Table(show_lines=False, title="Named, not yet written", title_style="bold")
+            for col in ("target", "referenced by", "relation"):
+                table.add_column(col)
+            for source, relation, target in sorted(dangling, key=lambda d: d[2]):
+                table.add_row(f"[yellow]{target}[/]", source, relation)
+            console.print(table)
+            console.print(
+                f"[dim]{len(dangling)} forward reference(s). These are intentions you "
+                "wrote, not errors — writing the node resolves the link with no fixup.[/]"
+            )
+        else:
+            console.print("No dangling references.")
+
+    if ambiguous or show_all:
+        analysis = morph.analyse(nodes, judge_transparency=False)
+        if analysis.ambiguous:
+            console.print()
+            table = Table(show_lines=False, title="Needs your call", title_style="bold")
+            for col in ("word", "prefix", "why"):
+                table.add_column(col)
+            for item in analysis.ambiguous:
+                table.add_row(
+                    f"[magenta]{item.word}[/]",
+                    f"{item.prefix}-",
+                    "stress decides separability, and spelling does not carry it",
+                )
+            console.print(table)
+            console.print(
+                "[dim]No grid claim is made for these. Set [bold]separable:[/] on the "
+                "node to resolve one (SPEC §7.4: the node holds the truth).[/]"
+            )
+        elif ambiguous:
+            console.print("Nothing ambiguous.")
+
+
+@app.command()
+def families(
+    nodes_dir: Path = typer.Option(config.NODES_DIR, "--nodes-dir", help="Node directory."),
+    proposals_dir: Path = typer.Option(
+        config.PROPOSALS_DIR, "--proposals-dir", help="Pending proposals."
+    ),
+    queue_dir: Path = typer.Option(
+        config.QUEUE_DIR, "--queue-dir", help="Where proposed new nodes are staged."
+    ),
+    vocab_dir: Path = typer.Option(config.VOCAB_DIR, "--vocab-dir", help="Tag vocabulary."),
+    cache_dir: Path = typer.Option(config.CACHE_DIR, "--cache-dir", help="Cache root."),
+    no_judge: bool = typer.Option(
+        False, "--no-judge", help="Skip the transparency call (rules only, zero model use)."
+    ),
+) -> None:
+    """Propose prefix nodes and same_family links from the corpus. Writes NOTHING to /nodes."""
+    try:
+        analysis = morph.analyse(
+            _grid_nodes(nodes_dir),
+            judge_transparency=not no_judge,
+            cache_dir=cache_dir,
+        )
+    except morph.TransparencyError as exc:
+        err_console.print(f"[red]Transparency judgment failed:[/] {exc}")
+        if exc.reasoning_content:
+            excerpt = exc.reasoning_content.strip().replace("\n", " ")[:300]
+            err_console.print(f"[dim]Model reasoning began: {excerpt}…[/]")
+        raise typer.Exit(code=1) from None
+
+    if not analysis.proposals:
+        console.print("Nothing to propose — the corpus already states what it implies.")
+    else:
+        # Stage the new nodes BEFORE writing their proposals. `apply_create` promotes a
+        # staged node -- it cannot build one from a Proposal, which carries an id and a
+        # body but none of `title_de`/`title_en`/`type`/`status`. Staging in /queue reuses
+        # slice 3's seam (ADR-009), so the file is hand-editable before approval like any
+        # other queued node, and /nodes is still only reached through review.
+        staged_dir = queue_dir / morph.MORPH_SOURCE_ID
+        staged_paths: dict[str, Path] = {}
+        for node in analysis.staged:
+            path = staged_dir / f"{node.id}.md"
+            # learn=False: staging is not the approved gate (ADR-007).
+            storage.write_node(node, path, vocab_dir=vocab_dir, learn=False)
+            staged_paths[node.id] = path
+
+        table = Table(show_lines=False)
+        for col in ("proposal", "kind", "about", "why"):
+            table.add_column(col)
+        for proposal in merge.review_order(analysis.proposals):
+            if (path := staged_paths.get(proposal.candidate)) is not None:
+                # Point at the staged file and drop the duplicate body: that file is the
+                # single source of truth for display, edit and write (ADR-011, amended).
+                proposal = proposal.model_copy(
+                    update={"candidate_path": str(path), "body_md": ""}
+                )
+            table.add_row(proposal.id, proposal.kind, proposal.candidate, proposal.reason)
+            merge.write_proposal(proposal, proposals_dir=proposals_dir)
+        console.print(table)
+        if staged_paths:
+            console.print(f"[dim]{len(staged_paths)} new node(s) staged -> {staged_dir}[/]")
+        console.print(
+            f"[bold]{len(analysis.proposals)}[/] proposal(s) -> [dim]{proposals_dir}[/]"
+        )
+        console.print(
+            "[dim]Nothing written to /nodes.[/] Run [bold]gw review[/] to decide them."
+        )
+
+    if analysis.ambiguous:
+        console.print(
+            f"[magenta]{len(analysis.ambiguous)} stress-ambiguous verb(s)[/] withheld — "
+            "see [bold]gw gaps --ambiguous[/]"
+        )
+    if analysis.judged:
+        console.print(f"[dim]{analysis.judged} transparency judgment(s) on the free model[/]")
 
 
 if __name__ == "__main__":

@@ -17,16 +17,22 @@
               │                 │       ══ THE GATE ══
              END                │
                                 │
-                              route    conditional on kind
-              ┌────────┬─────┬───┴───┬─────────┐
-            merge     link  create relevel  discard
-              └────────┴─────┴───┬───┴─────────┘
-                                END
+                             route          conditional on kind
+                               │
+        ┌────────┬────────┬────┴────┬────────────┬─────────┐
+      merge     link    create   relevel    morphology  discard
+        └────────┴────────┴────┬────┴────────────┴─────────┘
+                              END
 ```
 
-``relevel`` (slice 6) rewrites ``cefr``/``cefr_basis`` only; it joins here rather than
-getting its own command-with-a-write because ADR-003 gates writes to ``/nodes``, and one
-review queue is the whole point.
+Two kinds change frontmatter and nothing else, and both join here rather than getting
+their own command-with-a-write, because ADR-003 gates writes to ``/nodes`` and one review
+queue is the whole point:
+
+- ``relevel`` (slice 6) — ``cefr`` / ``cefr_basis`` (SPEC §5).
+- ``morphology`` (slice 7) — ``root`` / ``lemmas`` / ``separable`` /
+  ``family_transparency`` (SPEC §7). Its transparency field is an outright model judgment
+  about meaning, so it could never have been anything but reviewed.
 
 **The propose pass has no edge to any apply node.** ``adjudicate`` ends at ``END``, and the
 only way into ``route`` is to enter the graph with a human decision already in the state --
@@ -490,7 +496,11 @@ def _create_proposal(
         source_id=source_id,
         candidate=candidate.id,
         candidate_path=candidate_path,
-        body_md=candidate.body_md,
+        # No body: the staged queue file at `candidate_path` is the authoritative,
+        # hand-editable content (ADR-011, amended). Carrying a copy here is what let a
+        # reviewer's edit be silently discarded -- two editable artifacts holding the same
+        # text, with the proposal quietly winning.
+        body_md="" if candidate_path else candidate.body_md,
         reason="No existing node was judged the same concept.",
         created_at=_proposal.now_iso(ctx.stamp()),
     )
@@ -508,7 +518,7 @@ def _route(state: MergeState) -> str:
     if not decision.get("approved"):
         return "discard"
     kind = (decision.get("proposal") or {}).get("kind", "discard")
-    return kind if kind in ("merge", "link", "create", "relevel") else "discard"
+    return kind if kind in ("merge", "link", "create", "relevel", "morphology") else "discard"
 
 
 def _decided(state: MergeState) -> tuple[Proposal, bool]:
@@ -573,6 +583,20 @@ def relevel_apply_node(state: MergeState, runtime: Runtime[Context]) -> dict:
     }
 
 
+def morphology_apply_node(state: MergeState, runtime: Runtime[Context]) -> dict:
+    ctx = runtime.context
+    proposal, _ = _decided(state)
+    return {
+        "result": _apply.apply_morphology(
+            proposal,
+            nodes_dir=ctx.nodes_dir,
+            vocab_dir=ctx.vocab_dir,
+            decisions_log=ctx.decisions_log,
+            now=ctx.stamp(),
+        ).model_dump()
+    }
+
+
 def discard_apply_node(state: MergeState, runtime: Runtime[Context]) -> dict:
     ctx = runtime.context
     proposal, approved = _decided(state)
@@ -611,6 +635,7 @@ def build_graph():
     builder.add_node("link", link_apply_node)
     builder.add_node("create", create_apply_node)
     builder.add_node("relevel", relevel_apply_node)
+    builder.add_node("morphology", morphology_apply_node)
     builder.add_node("discard", discard_apply_node)
 
     builder.add_conditional_edges(START, _entry, {"extract": "extract", "route": "route"})
@@ -628,10 +653,11 @@ def build_graph():
             "link": "link",
             "create": "create",
             "relevel": "relevel",
+            "morphology": "morphology",
             "discard": "discard",
         },
     )
-    for node in ("merge", "link", "create", "relevel", "discard"):
+    for node in ("merge", "link", "create", "relevel", "morphology", "discard"):
         builder.add_edge(node, END)
 
     return builder.compile(checkpointer=InMemorySaver())

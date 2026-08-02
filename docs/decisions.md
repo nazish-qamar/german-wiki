@@ -447,6 +447,36 @@ approval-or-rejection and deleted either way, so the directory only ever holds p
 work. The durable record is the commit to `/nodes` that approval produces, plus
 `logs/decisions.jsonl`.
 
+> **AMENDED in slice 7 — the proposal body is authoritative only when there is no staged
+> node file.**
+>
+> As originally written, this section said the proposal body is the hand-editable content
+> and "what you edited is exactly what gets written". That is right for a **merge**, which
+> has no other file. It is wrong for a **create backed by `candidate_path`**, and the
+> difference was a silent data-loss bug.
+>
+> A staged create has *two* editable artifacts holding duplicate content: the queue file
+> (ADR-009: "review needs nothing but an editor") and the proposal body (this ADR). They
+> can diverge, and `apply_create` resolved the divergence in favour of the proposal —
+> overwriting the loaded staged node's body with its own copy, then `unlink()`ing the
+> staged file. A reviewer's edit was therefore **discarded and destroyed, with no copy
+> left anywhere**, while the command reported success.
+>
+> **The rule now: for any proposal backed by `candidate_path`, that file is authoritative
+> for display, edit, and write; the proposal never carries a duplicate body.** So
+> `gw review` renders the staged file's *current* content, `apply_create` promotes that
+> file, and staged-create proposals are written with `body_md: ""`. Merges keep the
+> original rule unchanged, because there is no second artifact to disagree with.
+>
+> The bug was latent from slice 5 and first reachable in slice 7 — `gw families` is the
+> first code that stages a node *and* writes a proposal carrying the same body. Regression
+> test: `test_cli_grid.py::test_a_hand_edit_to_a_staged_node_is_what_lands` edits only the
+> staged file and asserts that edit reaches `/nodes`.
+>
+> The general principle, worth more than the specific fix: **two artifacts holding the
+> same content is the bug, not the tie-break rule that resolves them.** Eliminating the
+> duplicate is what makes "what you edited is what lands" true rather than conditional.
+
 **2. Merges and links share one queue, one format, one command.** ADR-010 says a proposed
 edge sits "in the same queue and under the same gate as OVERLAP", and a second,
 lighter-feeling queue for links is precisely the loophole §4.3's reinterpretation has to
@@ -840,3 +870,147 @@ would ship a formula with a constant standing in for its main input.
   table is re-sorted; a negative lookahead does not.
 - *Parsing examples into `Node.examples` this slice* — dual source of truth, and slice 5's
   regeneration would drift from it immediately.
+
+---
+
+## ADR-014 — Slice 7: the grid reads human assertions, and withholds what it cannot know
+
+**Decided:** SPEC §7's root × prefix grid ships as a **view plus on-demand analysis**.
+Seven decisions inside it are worth not re-litigating.
+
+**1. Three prefix inventories, not two.** Separable and inseparable are the obvious split
+and they are not enough. A third class exists whose separability is not recoverable from
+text at all:
+
+    úmfahren   run over      separable
+    umfáhren   drive around  inseparable
+
+Identical spelling; the difference is stress, and stress is not written. So `um durch über
+unter wider wieder hinter voll` are a **variable** class, and a variable-prefix verb yields
+**no segmentation and no grid cell** — not a cell carrying a caveat.
+
+The distinction matters: a grid saying *"here is a family, caveat"* still teaches the
+family, while a grid saying nothing prompts you to decide. Stress-homographs are exactly
+where a silent segmentation does §7.4-shaped damage. **The withholding is structural** —
+membership in `VARIABLE` *is* the refusal — rather than a flag downstream, because a flag
+is something a later change can quietly start ignoring. `classify()` tests `VARIABLE`
+first, since several of its members are also legitimately in `SEPARABLE`.
+
+One escape hatch, and it is human: an explicit `separable:` on a node overrides the
+inventory. That is §7.4's *"the node holds the truth; the grid only predicts a guess"*,
+applied to segmentation rather than to meaning.
+
+**2. Columns come from human assertions, not from segmentation — and this is the
+non-obvious one.**
+
+The natural design derives grid columns by segmenting words. It cannot work here, and the
+reason is circular: `_segment` refuses `ankommen` because the corpus has no `kommen` node
+(rule 3 below), so a segmentation-driven grid could **never display the very links you
+wrote**. Corpus roots alone are no better — today they yield a 1×1 grid whose only cell is
+the non-word `anwaschen`.
+
+So an implied column comes from stripping a prefix node's *own* morpheme from its *own*
+`same_family` targets. `prefix-an` already asserts that `ankommen` belongs to it; the grid
+reads that claim and derives the column `kommen`. **That is reading a human's assertion,
+not guessing** — which is why it is allowed to be looser than segmentation is.
+
+If someone later "simplifies" this into calling `segment()`, the grid goes blank against a
+corpus full of forward references, and the cause will not be obvious.
+
+**3. Segmentation requires corpus evidence.** A split is proposed only when the residual
+stem already exists as a `root:` or a lemma. `verstehen` does not split, because there is
+no `stehen` node — which is SPEC §7.4's trap (`verstehen` ≠ `ver-` + `stehen`) shut by a
+mechanical rule rather than by a judgment call. Prefix-shaped starts are never blindly
+stripped.
+
+The constraint also means the grid grows *as you study* instead of speculating about
+vocabulary you have never met, and it keeps `gw families` from proposing edges into empty
+space. `no-corpus-evidence` resolves itself the day the stem gets a node; only
+`variable-stress` needs a person, which is why `Withheld.needs_human` distinguishes them.
+
+**4. A human may dangle; the pipeline may not.** Every link in the corpus currently points
+at a node that does not exist, and that is the feature (SPEC §7.3: *"Empty cells are words
+you haven't learned yet"*).
+
+- A hand-authored dangling link is an **intention**. `storage` does not validate target
+  existence, and `gw families` never re-proposes an existing edge even when it dangles —
+  turning your roadmap into a chore list would defeat it.
+- A pipeline-created dangling link is a **bug**. Slice 5's `apply_link` keeps its refusal.
+
+Same artifact, opposite rules, keyed on who wrote it — the same shape as ADR-007's
+`learn=True`, where human promotion may grow the vocabulary and automated ingest may not.
+
+Auto-creating stub nodes for dangling targets was rejected outright: it fills the gap the
+feature exists to detect, turns missing nodes into existing-looking stubs, and floods
+`/nodes` with material SPEC §3.4 says should not be nodes.
+
+**5. Dangling-ness is computed at read time, never stored.** The grid asks "does this
+target exist *right now*?". There is no flag anywhere.
+
+The consequence is the point: the day you write `nodes/ankommen.md`, its cell reads
+`learned` with **no migration, no flag to clear, no repair step**. A stored flag would need
+updating when the target appeared, and that fixup is exactly the maintenance this design
+refuses. A test creates the target of a dangling link and asserts the cell flips with
+nothing else done.
+
+**6. Transparency is the one model call, on the free step, pinned by a test.** Segmentation
+is mechanical; whether a family is a scaffold or a coincidence is semantic and not
+rule-decidable (§7.4). So `family_transparency` costs one `glm-4.5-flash` call and nothing
+else does — asserted by a test that no second module in `morph/` calls `complete`.
+
+It runs on **free flash, never the paid `glm-4.6`**: it is a per-candidate call that fires
+as verbs arrive, and a wrong answer marks a grid cell rather than corrupting a node body.
+The choice is asserted *against config*, so flipping adjudication to a paid model (as slice
+6 did) cannot drag this along with it — the cheap-by-default choice is enforced, not merely
+configured.
+
+`family_transparency` is written to `/nodes`, so it routes through review like every other
+classification (ADR-003). A family that already declares one is **never re-judged**, so a
+model verdict cannot overwrite yours.
+
+**7. A grid cell spells out a word only when something vouches for it.** This is a
+rendering rule and it is load-bearing, which is why it is here rather than left as a
+detail someone improves away.
+
+The grid computes a full cross-product, and most of that product is not German. `an-` ×
+`waschen` yields **`anwaschen`**, which is not a word. Printing it in a study tool reads as
+*"learn this"*. At 1×3 that is a curiosity; at 10 prefixes × 20 roots it would be roughly
+140 invented vocabulary items burying the real signal — and the tool **cannot** distinguish
+`abkommen` (real) from `anwaschen` (not) without a dictionary it does not have.
+
+So `learned`, `identified` and `irregular` print the word (a lemma, your own link, or a
+node's transparency vouches for each). `gap` prints the glyph alone. The row and column
+headers already say what the cell is, and composing it yourself is the exercise.
+
+A future change reading *"show the composed word for completeness"* looks like an
+improvement and is not: it re-introduces the non-word problem at whatever scale the corpus
+has then reached.
+
+**Also: SPEC §7.2's ingest-time auto-creation is deferred.** §7.2 wants a new verb linked
+to its root and prefix nodes automatically, "creating either if absent". That is a write
+path whose correctness rests on segmentation and transparency being trustworthy, and the
+corpus holds one family node and one prefix node — too thin to tune an automatic
+edge-writer against. Every earlier slice earned its automation by being watched first:
+detection before merge (4→5), queue before `/nodes` (3), propose before apply (5, 6). When
+the judgment is proven it can arrive as auto-accept-high-transparency / review-the-rest,
+which is also ADR-003's own revisit condition.
+
+**And one guard this slice exposed.** Adding `apply_morphology` left the suite **green**
+while the new write path was unguarded: `test_only_the_graph_drives_the_apply_functions`
+asserts which *files* call an apply function, and `merge/_graph.py` already qualified via
+the other five. The registry was hand-maintained, so it could only catch omissions someone
+remembered to prevent. It is now derived from `_apply.py` via AST, and every `Kind` is
+asserted to have a route — a kind without one falls through the router to `discard`, which
+reports success while writing nothing.
+
+**Rejected:**
+- *Two prefix inventories with a "variable" flag* — a flag annotates; membership withholds.
+- *Deriving grid columns by segmenting* — circular; the grid would go blank against exactly
+  the corpus it exists to display.
+- *Storing a `dangling` boolean* — creates a fixup step every time a target appears.
+- *Auto-creating stub nodes for dangling targets* — fills the gap the feature detects.
+- *Re-proposing links that already exist but dangle* — turns a roadmap into a chore list.
+- *Letting transparency run on whatever `defaults` points at* — it fires per candidate, so
+  an accidental paid-model drag is a real cost leak.
+- *Spelling out every cell "for completeness"* — invents vocabulary the tool cannot verify.
+- *Wiring §7.2's ingest hook now* — automation before observation, which no prior slice did.

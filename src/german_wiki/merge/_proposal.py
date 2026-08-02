@@ -45,8 +45,12 @@ from ._ledger import Kind
 # RELEVEL (slice 6) is likewise not an adjudication outcome: it is a CEFR re-derivation
 # (SPEC §5) riding the same queue, because ADR-003 gates every write to /nodes and a level
 # change drives §5.1's study order.
+#
+# MORPHOLOGY (slice 7) rides it for the same reason: root/lemmas/separable are derived
+# from rules, but `family_transparency` is a model judgment about meaning (SPEC §7.4), and
+# a family wrongly marked `high` teaches a false pattern.
 ProposalOutcome = Literal[
-    "SAME", "OVERLAP", "DISTINCT_RELATED", "DISTINCT", "MANUAL", "RELEVEL"
+    "SAME", "OVERLAP", "DISTINCT_RELATED", "DISTINCT", "MANUAL", "RELEVEL", "MORPHOLOGY"
 ]
 
 # Flags surfaced in the review diff. Advisory: they aim attention, they do not veto.
@@ -72,6 +76,10 @@ _ORDER = [
     "direction",
     "cefr",
     "cefr_basis",
+    "root",
+    "lemmas",
+    "separable",
+    "family_transparency",
     "similarity",
     "tier",
     "band",
@@ -116,6 +124,13 @@ class Proposal(BaseModel):
     # Node fields they replace, so the review diff reads as the frontmatter change it is.
     cefr: str | None = None
     cefr_basis: str | None = None
+
+    # morphology only (slice 7), same naming rule. `family_transparency` is the one that
+    # carries a model's judgment; the rest are rule-derived (SPEC §7.4).
+    root: str | None = None
+    lemmas: list[str] | None = None
+    separable: bool | None = None
+    family_transparency: str | None = None
 
     similarity: float | None = None
     tier: str | None = None

@@ -35,13 +35,49 @@ to be watched on real material first (ADR-014).
 
 from __future__ import annotations
 
+from ._analyse import MORPH_SOURCE_ID, Analysis, analyse
+from ._grid import (
+    Cell,
+    CellState,
+    Grid,
+    PrefixAxis,
+    RootAxis,
+    build_grid,
+    dangling_targets,
+    is_family_node,
+    is_prefix_node,
+    morpheme_of,
+)
 from ._prefixes import INSEPARABLE, SEPARABLE, VARIABLE, Separability, candidates, classify
+from ._segment import CorpusIndex, Segmentation, Withheld, segment
+from ._transparency import TRUSTED, Transparency, TransparencyError, judge
 
 __all__ = [
     "INSEPARABLE",
+    "MORPH_SOURCE_ID",
     "SEPARABLE",
+    "TRUSTED",
     "VARIABLE",
+    "Analysis",
+    "Cell",
+    "CellState",
+    "CorpusIndex",
+    "Grid",
+    "PrefixAxis",
+    "RootAxis",
+    "Segmentation",
     "Separability",
+    "Transparency",
+    "TransparencyError",
+    "Withheld",
+    "analyse",
+    "build_grid",
     "candidates",
     "classify",
+    "dangling_targets",
+    "is_family_node",
+    "is_prefix_node",
+    "judge",
+    "morpheme_of",
+    "segment",
 ]

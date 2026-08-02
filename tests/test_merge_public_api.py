@@ -58,6 +58,7 @@ APPLY_FUNCTIONS = {
     "apply_create",
     "apply_discard",
     "apply_relevel",
+    "apply_morphology",
 }
 
 
@@ -108,6 +109,41 @@ def _called_name(call: ast.Call) -> str | None:
     if isinstance(func, ast.Name):
         return func.id
     return None
+
+
+def test_the_apply_registry_is_complete() -> None:
+    """``APPLY_FUNCTIONS`` must list every ``apply_*`` defined in ``_apply.py``.
+
+    Without this, the registry silently falls behind. Slice 7 proved it: adding
+    ``apply_morphology`` left the suite **green**, because the test below asserts which
+    *files* call an apply function and ``merge/_graph.py`` already qualified via the other
+    five. A new, unguarded write path produced no failure anywhere.
+
+    So the registry is derived and compared rather than trusted. Adding an apply function
+    now fails here until it is registered, which is what makes the check below mean
+    something.
+    """
+    tree = ast.parse((PACKAGE_DIR / "merge" / "_apply.py").read_text(encoding="utf-8"))
+    defined = {
+        node.name
+        for node in tree.body  # module level only -- a nested helper is not a route
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("apply_")
+    }
+    assert defined == APPLY_FUNCTIONS
+
+
+def test_every_proposal_kind_has_a_route() -> None:
+    """A ``Kind`` with no apply function would fall through the router to ``discard``.
+
+    That failure is silent and looks like a rejection, so it is worth an assertion:
+    approving such a proposal would report success while writing nothing.
+    """
+    from typing import get_args
+
+    from german_wiki.merge._ledger import Kind
+
+    kinds = set(get_args(Kind))
+    assert {f"apply_{k}" for k in kinds} == APPLY_FUNCTIONS
 
 
 def test_only_the_graph_drives_the_apply_functions() -> None:

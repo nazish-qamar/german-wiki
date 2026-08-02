@@ -47,7 +47,11 @@ REGENERATING_OUTCOMES = frozenset({"OVERLAP"})
 # rather than its own command-with-a-write because ADR-003 gates writes to /nodes, not
 # uncertain judgments -- and matching a node to a SPEC §5 grammar row is an interpretation
 # that can be wrong, even though the level lookup that follows is a table read.
-Kind = Literal["merge", "link", "create", "discard", "relevel"]
+#
+# `morphology` (slice 7) is the same shape one slice on: root / lemmas / separable /
+# family_transparency, and nothing else. The transparency half is an outright model
+# judgment (SPEC §7.4), so it could never have been anything but reviewed.
+Kind = Literal["merge", "link", "create", "discard", "relevel", "morphology"]
 
 
 class LedgerUnreadable(RuntimeError):

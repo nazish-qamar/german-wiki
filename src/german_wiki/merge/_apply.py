@@ -46,7 +46,16 @@ logger = get_logger(__name__)
 # `relevel` sits AFTER `merge` deliberately: a merge archives its loser to /_merged, and
 # re-levelling a node that has just been archived would fail on the expect_exists check.
 # Ordering it here means one review session can merge a pair and then level the survivor.
-KIND_ORDER = {"create": 0, "merge": 1, "link": 2, "relevel": 3, "discard": 4}
+# `morphology` sits after `link`: a family edge may create the very node whose morphology
+# is being set, and both must land after `merge` has finished archiving losers.
+KIND_ORDER = {
+    "create": 0,
+    "merge": 1,
+    "link": 2,
+    "relevel": 3,
+    "morphology": 4,
+    "discard": 5,
+}
 
 # The trust ladder, and the one rung a machine regeneration knocks a node down.
 #
@@ -363,12 +372,24 @@ def apply_create(
     decisions_log: Path | str | None = None,
     now: datetime | None = None,
 ) -> ApplyResult:
-    """Promote the candidate as a new node -- the ordinary slice-3 path, gated."""
+    """Promote the candidate as a new node -- the ordinary slice-3 path, gated.
+
+    **The staged file is authoritative when there is one** (ADR-011, amended). This line
+    used to read ``if proposal.body_md.strip(): node = node.model_copy(...)``
+    unconditionally, which meant a hand-edit to the queue file was silently overwritten by
+    the proposal's duplicate copy -- and then ``staged.unlink()`` below destroyed the
+    edited file, leaving no copy of the edit anywhere.
+
+    The duplicate is now gone at the source (proposals backed by ``candidate_path`` carry
+    no body), so this is belt-and-braces: even a proposal written by an older version
+    cannot override the file the reviewer actually edited.
+    """
     stamp = now or datetime.now(UTC)
     node = _load_side(proposal, proposal.candidate, nodes_dir)
     staged = _origin_path(proposal, proposal.candidate, nodes_dir)
 
-    if proposal.body_md.strip():
+    if staged is None and proposal.body_md.strip():
+        # No file behind this create, so the proposal is the only source there is.
         node = node.model_copy(update={"body_md": proposal.body_md})
 
     decision_id = _record(proposal, approved=True, decisions_log=decisions_log, now=stamp)
@@ -436,6 +457,64 @@ def apply_relevel(
         written=[node.id],
         decision_id=decision_id,
         note=f"{before[0]} -> {proposal.cefr}",
+    )
+
+
+def apply_morphology(
+    proposal: Proposal,
+    *,
+    nodes_dir: Path | str | None = None,
+    vocab_dir: Path | str | None = None,
+    decisions_log: Path | str | None = None,
+    now: datetime | None = None,
+) -> ApplyResult:
+    """Rewrite the morphology frontmatter on one node (SPEC §7). Nothing else moves.
+
+    Same narrow shape as ``apply_relevel``: body untouched, ``writes_body`` False, and no
+    status demotion, because nothing was re-encoded and the reviewer saw the whole change.
+
+    Only fields the proposal actually carries are written. That matters here more than it
+    did for relevel, because a morphology proposal is often *partial* -- ``gw families``
+    may have a transparency verdict for a family but nothing new to say about its lemmas,
+    and blanking `lemmas` because the proposal was silent about them would delete curated
+    content. Absent means "no opinion", never "set to empty".
+    """
+    stamp = now or datetime.now(UTC)
+    node = _load_side(proposal, proposal.candidate, nodes_dir)
+
+    fields = {
+        name: value
+        for name, value in (
+            ("root", proposal.root),
+            ("lemmas", proposal.lemmas),
+            ("separable", proposal.separable),
+            ("family_transparency", proposal.family_transparency),
+        )
+        if value is not None
+    }
+    if not fields:
+        raise ApplyError(
+            f"morphology proposal {proposal.id!r} carries no morphology fields; "
+            "approving it would write nothing"
+        )
+
+    before = {name: getattr(node, name) for name in fields}
+    updated = node.model_copy(
+        update={**fields, "version": (node.version or 1) + 1, "updated_at": stamp}
+    )
+
+    decision_id = _record(proposal, approved=True, decisions_log=decisions_log, now=stamp)
+    write_approved(updated, nodes_dir=nodes_dir, vocab_dir=vocab_dir, expect_exists=True)
+
+    changed = ", ".join(f"{k}: {before[k]!r} -> {v!r}" for k, v in fields.items())
+    logger.info("morphology on %s: %s", node.id, changed)
+    return ApplyResult(
+        proposal_id=proposal.id,
+        kind="morphology",
+        approved=True,
+        written=[node.id],
+        decision_id=decision_id,
+        note=changed,
     )
 
 
