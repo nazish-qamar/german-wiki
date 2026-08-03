@@ -42,11 +42,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ..llm import JSON_OBJECT, ChatClient, ModelResponse, Prompt, ShotPair, complete
+from ..llm import JSON_OBJECT, ChatClient, ModelResponse, Prompt, ShotPair, complete, strip_fences
 from ..logutil import get_logger
 from ..models import Node
 from . import _ledger
-from ._adjudicate import STEP, AdjudicationError, _strip_fences
+from ._adjudicate import STEP, AdjudicationError
 
 logger = get_logger(__name__)
 
@@ -339,7 +339,7 @@ def parse(response: ModelResponse, *, sources: list[str] | None = None) -> Merge
             response=response,
         )
 
-    body = _strip_fences(response.text)
+    body = strip_fences(response.text)
     if not body:
         raise AdjudicationError(
             f"merge regeneration returned no content (finish_reason={response.finish_reason})",

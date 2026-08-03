@@ -24,7 +24,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ..llm import JSON_OBJECT, ChatClient, ModelResponse, Prompt, ShotPair, complete
+from ..llm import JSON_OBJECT, ChatClient, ModelResponse, Prompt, ShotPair, complete, strip_fences
 from ..models import CEFR
 
 STEP = "cefr_tiebreak"
@@ -146,22 +146,6 @@ def build_prompt(
     )
 
 
-def _strip_fences(text: str) -> str:
-    """Drop a ```json … ``` wrapper. Third occurrence of this helper; see note below.
-
-    ``_adjudicate`` documents the rule-of-three policy this defers to. This is that third
-    copy, so the next slice touching response parsing should extract it — deliberately
-    not done mid-slice, where it would mean editing two working parsers to no benefit.
-    """
-    stripped = text.strip()
-    if not stripped.startswith("```"):
-        return stripped
-    lines = stripped.splitlines()[1:]
-    if lines and lines[-1].strip().startswith("```"):
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
-
-
 def parse(response: ModelResponse) -> Tiebreak:
     """Validate a tiebreak response, or raise ``TiebreakError``.
 
@@ -177,7 +161,7 @@ def parse(response: ModelResponse) -> Tiebreak:
             response=response,
         )
 
-    body = _strip_fences(response.text)
+    body = strip_fences(response.text)
     if not body:
         raise TiebreakError(
             f"cefr tiebreak returned no content (finish_reason={response.finish_reason})",

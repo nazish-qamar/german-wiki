@@ -25,6 +25,7 @@ from typing import Any
 from ._cache import clear as _cache_clear
 from ._cache import stats as _cache_stats
 from ._client import JSON_OBJECT, ChatClient, ModelResponse, complete
+from ._parse import strip_fences
 from ._prompt import Prompt, ShotPair
 from ._settings import ResolvedStep, resolve_step
 from ._usage import Usage
@@ -43,6 +44,7 @@ __all__ = [
     "complete",
     "cost_totals",
     "resolve_step",
+    "strip_fences",
 ]
 
 

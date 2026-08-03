@@ -36,7 +36,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ..llm import JSON_OBJECT, ChatClient, ModelResponse, Prompt, ShotPair, complete
+from ..llm import JSON_OBJECT, ChatClient, ModelResponse, Prompt, ShotPair, complete, strip_fences
 from ..logutil import get_logger
 from ..models import Node
 
@@ -254,22 +254,6 @@ def build_prompt(a: Node, b: Node) -> Prompt:
 # --- parsing ---
 
 
-def _strip_fences(text: str) -> str:
-    """Drop a ```json ... ``` wrapper. Providers emit them despite response_format.
-
-    Duplicated from ``ingest/_extract.py`` rather than shared: two occurrences, and
-    the same rule-of-three policy ADR-010 applied to the caches. Extract it the day a
-    third parser needs it.
-    """
-    stripped = text.strip()
-    if not stripped.startswith("```"):
-        return stripped
-    lines = stripped.splitlines()[1:]
-    if lines and lines[-1].strip().startswith("```"):
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
-
-
 def _coherent(verdict: Adjudication) -> Adjudication:
     """Reconcile fields the schema cannot constrain against each other.
 
@@ -318,7 +302,7 @@ def parse(response: ModelResponse) -> Adjudication:
             response=response,
         )
 
-    body = _strip_fences(response.text)
+    body = strip_fences(response.text)
     if not body:
         raise AdjudicationError(
             f"adjudication returned no content (finish_reason={response.finish_reason})",

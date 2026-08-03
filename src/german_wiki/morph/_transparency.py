@@ -33,7 +33,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ..llm import JSON_OBJECT, ChatClient, ModelResponse, Prompt, ShotPair, complete
+from ..llm import JSON_OBJECT, ChatClient, ModelResponse, Prompt, ShotPair, complete, strip_fences
 from ..logutil import get_logger
 from ..models import FamilyTransparency
 
@@ -155,19 +155,6 @@ def build_prompt(*, root: str, prefix: str, word: str, gloss: str = "") -> Promp
     )
 
 
-def _strip_fences(text: str) -> str:
-    """Drop a ```json ... ``` wrapper. Third occurrence of this helper, and the point at
-    which the rule of three says to extract it -- deferred deliberately until slice 7's
-    own churn settles, and noted here so it is not forgotten."""
-    stripped = text.strip()
-    if not stripped.startswith("```"):
-        return stripped
-    lines = stripped.splitlines()[1:]
-    if lines and lines[-1].strip().startswith("```"):
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
-
-
 def parse(response: ModelResponse) -> Transparency:
     """Validate a verdict, or raise. Truncation is checked before parsing, as ever."""
     if response.finish_reason == "length":
@@ -178,7 +165,7 @@ def parse(response: ModelResponse) -> Transparency:
             response=response,
         )
 
-    body = _strip_fences(response.text)
+    body = strip_fences(response.text)
     if not body:
         raise TransparencyError(
             f"transparency returned no content (finish_reason={response.finish_reason})",

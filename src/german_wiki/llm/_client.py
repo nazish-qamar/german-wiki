@@ -24,8 +24,14 @@ auto-failover raises questions -- shared cache key or not, double-logging, what
 counts as fatal -- better answered against a real failure than guessed at now.
 Timeouts and retries are the SDK's, configured per provider.
 
-No response parsing lives here. ``response_format`` is passed through and hashed,
-but interpreting what comes back belongs to slice 3.
+No **domain** parsing lives here. ``response_format`` is passed through and hashed,
+but interpreting what comes back -- candidates, a verdict, a level -- belongs to the
+slice that asked the question, along with its schema and failure modes.
+
+The one thing this package does undo is what the *provider* did to the response:
+``_parse.strip_fences`` removes a markdown fence the provider added despite being asked
+for JSON, which is the same category as capturing ``reasoning_content`` or surfacing
+``finish_reason``. It is an artifact around the content, not the content.
 """
 
 from __future__ import annotations

@@ -27,7 +27,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ..llm import JSON_OBJECT, ChatClient, ModelResponse, Prompt, ShotPair, complete
+from ..llm import JSON_OBJECT, ChatClient, ModelResponse, Prompt, ShotPair, complete, strip_fences
 from ..logutil import get_logger
 from ..models import CEFR, NodeType
 
@@ -213,17 +213,6 @@ def build_prompt(text: str) -> Prompt:
 # --- parsing ---
 
 
-def _strip_fences(text: str) -> str:
-    """Drop a ```json ... ``` wrapper. Providers emit them despite response_format."""
-    stripped = text.strip()
-    if not stripped.startswith("```"):
-        return stripped
-    lines = stripped.splitlines()[1:]
-    if lines and lines[-1].strip().startswith("```"):
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
-
-
 def parse(response: ModelResponse) -> list[Candidate]:
     """Validate a model response into candidates, or raise ``ExtractionError``.
 
@@ -238,7 +227,7 @@ def parse(response: ModelResponse) -> list[Candidate]:
             response=response,
         )
 
-    body = _strip_fences(response.text)
+    body = strip_fences(response.text)
     if not body:
         raise ExtractionError(
             f"extraction returned no content (finish_reason={response.finish_reason})",

@@ -24,6 +24,11 @@ EXPECTED = {
     "cache_stats",
     "complete",
     "cost_totals",
+    # Public since slice 7's rule-of-three extraction. Undoing a markdown fence the
+    # PROVIDER added despite response_format is a provider artifact, not domain parsing --
+    # the same category as capturing reasoning_content. Interpreting what a response
+    # *means* still belongs to the calling slice.
+    "strip_fences",
 }
 
 PACKAGE_DIR = config.PROJECT_ROOT / "src" / "german_wiki"
