@@ -271,21 +271,168 @@ def cache_clear(
     console.print(f"[dim]{cache_dir}[/]")
 
 
+def _ocr_dry_run(file: Path, *, cache_dir: Path) -> None:
+    """Show what OCR reads, and write **nothing at all** — not even the image.
+
+    For checking a scan's legibility before committing the pipeline behind it. The call
+    is cached by the image's bytes (ADR-015), so the real ingest afterwards is free.
+    """
+    if not ingest.is_image(file):
+        err_console.print(f"[red]--dry-run applies to images;[/] {file.name} is not one.")
+        raise typer.Exit(code=1)
+    try:
+        text, response = ingest.transcribe(file, cache_dir=cache_dir)
+    except ingest.VisionError as exc:
+        err_console.print(f"[red]OCR failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+    console.rule(f"[bold]{file.name}[/]")
+    console.print(text)
+    console.rule()
+    console.print(
+        f"[dim]{len(text)} chars · {response.provider}/{response.model}"
+        f"{' · cached' if response.cached else ''} · nothing written[/]"
+    )
+    console.print("[dim]Re-run without --dry-run to ingest; the OCR call is cached.[/]")
+
+
+def _ingest_pdf_command(
+    file: Path,
+    *,
+    force: bool,
+    raw_dir: Path,
+    queue_dir: Path,
+    nodes_dir: Path,
+    vocab_dir: Path,
+    cache_dir: Path,
+) -> None:
+    """A text-layer PDF: one source per page, no vision call, no cost."""
+    try:
+        report = ingest.ingest_pdf(
+            file,
+            force=force,
+            raw_dir=raw_dir,
+            queue_dir=queue_dir,
+            nodes_dir=nodes_dir,
+            vocab_dir=vocab_dir,
+            cache_dir=cache_dir,
+        )
+    except ingest.PdfError as exc:
+        # Includes the scanned-PDF refusal, whose message names the next step.
+        err_console.print(f"[yellow]{exc}[/]")
+        raise typer.Exit(code=1) from None
+    except ingest.ExtractionError as exc:
+        err_console.print(f"[red]Extraction failed:[/] {exc}")
+        raise typer.Exit(code=1) from None
+
+    table = Table(show_lines=False)
+    for col in ("page", "source id", "candidates"):
+        table.add_column(col)
+    for number, page in enumerate(report.pages, start=1):
+        table.add_row(
+            str(number),
+            page.source_id,
+            "already ingested" if page.already_ingested else str(len(page.nodes)),
+        )
+    console.print(table)
+    console.print(f"[dim]document -> {report.document_path}[/]")
+    console.print(
+        f"[bold]{len(report.pages)}[/] page(s) ingested as separate sources "
+        f"[dim](SPEC §8.1: provenance points at the page)[/]"
+    )
+    if report.skipped_pages:
+        console.print(
+            f"[yellow]{len(report.skipped_pages)} page(s) had no text and were skipped:[/] "
+            f"{', '.join(str(n) for n in report.skipped_pages)}. "
+            "Export those as images and ingest them to OCR them."
+        )
+    console.print(
+        "[dim]Nothing written to /nodes.[/] Review the queued files, then "
+        "[bold]gw promote <source-id>[/] per page."
+    )
+
+
+def _ocr_checkpoint(transcription: str, image_path: Path) -> str | None:
+    """Show the transcription and let you accept, correct or abort it (ADR-015).
+
+    This is the *only* moment the OCR is cheap to check. Once accepted it is frozen in
+    ``/raw``, which SPEC §1.2 makes immutable and §12.1 makes the reference you check a
+    drifted node against -- so an error here is not just a bad node, it corrupts the
+    thing you would use to *detect* the bad node.
+
+    German OCR fails in ways that survive a glance: ``Bäckerei`` -> ``Backerei``,
+    ``ß`` -> ``B``, ``groß`` -> ``gross``. Read the umlauts.
+    """
+    console.rule("[bold]Transcription[/]")
+    console.print(transcription)
+    console.rule()
+    console.print(
+        f"[dim]{len(transcription)} chars from {image_path.name}. "
+        "Check the umlauts and ß — this text becomes the permanent record.[/]"
+    )
+
+    answer = (
+        typer.prompt("\n[a]ccept / [e]dit / [r]eject", default="a", show_default=True)
+        .strip()
+        .lower()[:1]
+    )
+    if answer == "a":
+        return transcription
+    if answer != "e":
+        return None
+
+    # Hand it to $EDITOR rather than asking for a paste: a page of German prose is not
+    # something to retype at a prompt, and the queue-file idiom (ADR-009) is already
+    # "review needs nothing but an editor".
+    edited = typer.edit(transcription, extension=".txt")
+    if edited is None:
+        console.print("[dim]editor closed without saving — keeping the original[/]")
+        return transcription
+    return edited
+
+
 @app.command("ingest")
 def ingest_text(  # named to avoid shadowing the `ingest` package imported above
-    file: Path = typer.Option(..., "--file", "-f", help="Plain-text source to ingest."),
+    file: Path = typer.Option(..., "--file", "-f", help="Text, image or PDF source."),
     force: bool = typer.Option(False, "--force", help="Re-ingest even if already in /raw."),
+    yes: bool = typer.Option(
+        False, "--yes", help="Accept the OCR transcription without the checkpoint."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show the OCR and stop — writes nothing at all."
+    ),
     raw_dir: Path = typer.Option(config.RAW_DIR, "--raw-dir", help="Immutable raw store."),
     queue_dir: Path = typer.Option(config.QUEUE_DIR, "--queue-dir", help="Review queue."),
     nodes_dir: Path = typer.Option(
         config.NODES_DIR, "--nodes-dir", help="Node dir (read-only here; for id collisions)."
     ),
     vocab_dir: Path = typer.Option(config.VOCAB_DIR, "--vocab-dir", help="Tag vocabulary."),
+    cache_dir: Path = typer.Option(config.CACHE_DIR, "--cache-dir", help="Cache root."),
 ) -> None:
-    """Extract concepts from a text file into the review queue. Writes NOTHING to /nodes."""
+    """Extract concepts from a text file, image or PDF. Writes NOTHING to /nodes.
+
+    Three paths to one pipeline: text goes straight to extraction, an image is OCR'd and
+    checkpointed first, and a PDF's text layer is read page by page for free.
+    """
     if not Path(file).is_file():
         err_console.print(f"[red]No such file:[/] {file}")
         raise typer.Exit(code=1)
+
+    if ingest.is_pdf(file):
+        _ingest_pdf_command(
+            file,
+            force=force,
+            raw_dir=raw_dir,
+            queue_dir=queue_dir,
+            nodes_dir=nodes_dir,
+            vocab_dir=vocab_dir,
+            cache_dir=cache_dir,
+        )
+        return
+
+    if dry_run:
+        _ocr_dry_run(file, cache_dir=cache_dir)
+        return
 
     try:
         result = ingest.ingest_file(
@@ -295,7 +442,18 @@ def ingest_text(  # named to avoid shadowing the `ingest` package imported above
             queue_dir=queue_dir,
             nodes_dir=nodes_dir,
             vocab_dir=vocab_dir,
+            cache_dir=cache_dir,
+            confirm=None if yes else _ocr_checkpoint,
         )
+    except ingest.OcrRejected as exc:
+        console.print(f"[yellow]{exc}[/]")
+        raise typer.Exit(code=1) from None
+    except ingest.VisionError as exc:
+        err_console.print(f"[red]OCR failed:[/] {exc}")
+        if exc.reasoning_content:
+            excerpt = exc.reasoning_content.strip().replace("\n", " ")[:300]
+            err_console.print(f"[dim]Model reasoning began: {excerpt}…[/]")
+        raise typer.Exit(code=1) from None
     except ingest.ExtractionError as exc:
         err_console.print(f"[red]Extraction failed:[/] {exc}")
         if exc.reasoning_content:

@@ -19,12 +19,26 @@ No merging and no dedup here: every candidate becomes a node (SPEC §11).
 from __future__ import annotations
 
 from ._extract import MAX_CANDIDATES, Candidate, ExtractionError
-from ._ingest import IngestResult, ingest_file
+from ._ingest import (
+    Confirm,
+    IngestResult,
+    OcrRejected,
+    PdfIngestResult,
+    ingest_file,
+    ingest_pdf,
+)
 from ._nodes import list_queue
-from ._pdf import MIN_PAGE_CHARS, MIN_TEXT_PAGE_RATIO, PdfError, PdfExtraction, extract_pages
+from ._pdf import (
+    MIN_PAGE_CHARS,
+    MIN_TEXT_PAGE_RATIO,
+    PdfError,
+    PdfExtraction,
+    extract_pages,
+    is_pdf,
+)
 from ._promote import PromoteResult, Refusal, promote_source, write_approved
 from ._raw import read_raw_text
-from ._vision import MAX_IMAGE_BYTES, VisionError, transcribe
+from ._vision import MAX_IMAGE_BYTES, VisionError, is_image, transcribe
 
 # The dials, on the public surface where `embed.GRAY_LOW` and `merge.MAX_REGENERATIONS`
 # live. Slice 8's are guesses made before seeing many real German textbook PDFs, so they
@@ -36,15 +50,21 @@ __all__ = [
     "MIN_PAGE_CHARS",
     "MIN_TEXT_PAGE_RATIO",
     "Candidate",
+    "Confirm",
     "ExtractionError",
     "IngestResult",
+    "OcrRejected",
     "PdfError",
     "PdfExtraction",
+    "PdfIngestResult",
     "PromoteResult",
     "Refusal",
     "VisionError",
     "extract_pages",
     "ingest_file",
+    "ingest_pdf",
+    "is_image",
+    "is_pdf",
     "list_queue",
     "promote_source",
     "read_raw_text",

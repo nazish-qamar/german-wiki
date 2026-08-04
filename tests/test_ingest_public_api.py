@@ -19,15 +19,26 @@ EXPECTED = {
     "MIN_PAGE_CHARS",
     "MIN_TEXT_PAGE_RATIO",
     "Candidate",
+    "Confirm",
     "ExtractionError",
     "IngestResult",
+    # Declining a transcription at the OCR checkpoint is an answer, not a failure:
+    # nothing is frozen, the image stays, and a retry is free because the call is cached.
+    "OcrRejected",
     "PdfError",
     "PdfExtraction",
+    "PdfIngestResult",
     "PromoteResult",
     "Refusal",
     "VisionError",
     "extract_pages",
     "ingest_file",
+    "ingest_pdf",
+    # Published because `cli.py` needs to route on file type. Reaching into
+    # `ingest._vision` for them would cross the boundary this module exists to police --
+    # which is exactly what happened before `_PRIVATE_IMPORT` was tightened below.
+    "is_image",
+    "is_pdf",
     "list_queue",
     "promote_source",
     "read_raw_text",
@@ -37,7 +48,21 @@ EXPECTED = {
 
 PACKAGE_DIR = config.PROJECT_ROOT / "src" / "german_wiki"
 
-_PRIVATE_IMPORT = re.compile(r"^\s*(?:from|import)\s+[\w.]*ingest\._\w+", re.MULTILINE)
+# Two forms reach a private module, and the original pattern only caught the first:
+#
+#     from german_wiki.ingest._vision import transcribe   <- dotted; always caught
+#     from .ingest import _vision                          <- MISSED until slice 8
+#
+# Slice 8 walked straight into the gap: `cli.py` imported `_vision` the second way and
+# the suite stayed green while the boundary was broken. A test that only catches the
+# obvious spelling of a violation is worse than none, because it certifies the code.
+_PRIVATE_IMPORT = re.compile(
+    r"""^\s*(?:
+        (?:from|import)\s+[\w.]*ingest\._\w+      # from x.ingest._vision import y
+      | from\s+[\w.]*ingest\s+import\s+[^\n]*\b_\w+   # from .ingest import _vision
+    )""",
+    re.MULTILINE | re.VERBOSE,
+)
 
 
 def test_all_matches_the_documented_interface() -> None:
