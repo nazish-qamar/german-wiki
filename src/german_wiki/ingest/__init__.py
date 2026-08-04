@@ -18,21 +18,36 @@ No merging and no dedup here: every candidate becomes a node (SPEC §11).
 
 from __future__ import annotations
 
-from ._extract import Candidate, ExtractionError
+from ._extract import MAX_CANDIDATES, Candidate, ExtractionError
 from ._ingest import IngestResult, ingest_file
 from ._nodes import list_queue
+from ._pdf import MIN_PAGE_CHARS, MIN_TEXT_PAGE_RATIO, PdfError, PdfExtraction, extract_pages
 from ._promote import PromoteResult, Refusal, promote_source, write_approved
 from ._raw import read_raw_text
+from ._vision import MAX_IMAGE_BYTES, VisionError, transcribe
 
+# The dials, on the public surface where `embed.GRAY_LOW` and `merge.MAX_REGENERATIONS`
+# live. Slice 8's are guesses made before seeing many real German textbook PDFs, so they
+# are the ones most likely to need moving -- which is exactly why they belong somewhere
+# you would think to look rather than inside a private module.
 __all__ = [
+    "MAX_CANDIDATES",
+    "MAX_IMAGE_BYTES",
+    "MIN_PAGE_CHARS",
+    "MIN_TEXT_PAGE_RATIO",
     "Candidate",
     "ExtractionError",
     "IngestResult",
+    "PdfError",
+    "PdfExtraction",
     "PromoteResult",
     "Refusal",
+    "VisionError",
+    "extract_pages",
     "ingest_file",
     "list_queue",
     "promote_source",
     "read_raw_text",
+    "transcribe",
     "write_approved",
 ]

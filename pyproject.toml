@@ -13,6 +13,11 @@ dependencies = [
     "rich==15.0.0",
     "python-dotenv==1.2.2",
     "langgraph==1.2.9",
+    # Slice 8. Text-layer PDF extraction only -- pure Python, no system deps.
+    # Rasterizing SCANNED pages would need PyMuPDF (~20MB binary) or poppler, and is
+    # deliberately not taken on: a scanned PDF is refused and pointed at the image path
+    # (ADR-015). Most course material has a text layer, which is free to read.
+    "pypdf==6.1.1",
 ]
 
 [project.optional-dependencies]

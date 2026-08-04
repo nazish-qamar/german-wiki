@@ -10,15 +10,28 @@ import pytest
 from german_wiki import config, ingest
 
 EXPECTED = {
+    # The tunable dials, on the public surface by the same convention as
+    # `embed.GRAY_LOW` and `merge.MAX_REGENERATIONS`. Slice 8's two PDF thresholds were
+    # guessed before seeing real German textbook PDFs, so they are the likeliest in the
+    # codebase to need moving -- which is precisely why they must be findable.
+    "MAX_CANDIDATES",
+    "MAX_IMAGE_BYTES",
+    "MIN_PAGE_CHARS",
+    "MIN_TEXT_PAGE_RATIO",
     "Candidate",
     "ExtractionError",
     "IngestResult",
+    "PdfError",
+    "PdfExtraction",
     "PromoteResult",
     "Refusal",
+    "VisionError",
+    "extract_pages",
     "ingest_file",
     "list_queue",
     "promote_source",
     "read_raw_text",
+    "transcribe",
     "write_approved",
 }
 
