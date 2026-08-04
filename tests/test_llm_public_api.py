@@ -11,6 +11,10 @@ from german_wiki import config, llm
 EXPECTED = {
     "JSON_OBJECT",
     "ChatClient",
+    # Slice 8: an image attached to a prompt. Public because vision is an ordinary
+    # `complete()` call -- building the multimodal message any other way would mean a
+    # second path to a provider, with its own caching and cost logging to forget.
+    "ImagePart",
     "ModelResponse",
     "Prompt",
     # Public since slice 4: a LOCAL runner (the embedder) needs its configured

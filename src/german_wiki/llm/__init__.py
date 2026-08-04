@@ -26,7 +26,7 @@ from ._cache import clear as _cache_clear
 from ._cache import stats as _cache_stats
 from ._client import JSON_OBJECT, ChatClient, ModelResponse, complete
 from ._parse import strip_fences
-from ._prompt import Prompt, ShotPair
+from ._prompt import ImagePart, Prompt, ShotPair
 from ._settings import ResolvedStep, resolve_step
 from ._usage import Usage
 from ._usage import totals as _totals
@@ -34,6 +34,7 @@ from ._usage import totals as _totals
 __all__ = [
     "JSON_OBJECT",
     "ChatClient",
+    "ImagePart",
     "ModelResponse",
     "Prompt",
     "ResolvedStep",

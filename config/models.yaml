@@ -43,6 +43,20 @@ pricing:
     # Checked 2026-07-31, docs.z.ai. "Cached input storage" is listed as
     # limited-time free, so only the cached-token read rate is modelled here.
     glm-4.6: { input: 0.60, cached_input: 0.11, output: 2.20 }
+    # --- Vision (slice 8). All checked 2026-08-03, docs.z.ai. ---
+    #
+    # In use: free, and explicitly zero-priced so it reports as KNOWN-free rather than
+    # unpriced. Same distinction the local embedder entry below spells out.
+    glm-4.6v-flash: { input: 0.0, cached_input: 0.0, output: 0.0 }
+    #
+    # The paid upgrade path, recorded here so switching is a one-line edit with a rate
+    # already verified -- never a guess (ADR-008 §4):
+    #   glm-4.6v   $0.30 in / $0.90 out   <- take this if free-flash OCR proves inadequate
+    #   glm-ocr    $0.03 in / $0.03 out   <- purpose-built for OCR; cheaper still
+    #
+    # NOT glm-4.5v, which slice 2 reserved before any of these existed: it is superseded
+    # and costs $0.60/$1.80 -- twice the current paid model for an older one. Left
+    # unlisted deliberately, so routing to it would report unpriced and warn.
   # Local embeddings are free, but "free" and "unknown" must stay distinguishable:
   # without an entry they would report as unpriced, as if the rate were merely
   # untracked. An explicit zero says known-free.
@@ -138,9 +152,32 @@ steps:
     fallback: { provider: deepseek, model: deepseek-chat }
 
   vision: # SPEC §9 -- image/PDF OCR. Slice 8.
-    status: planned
-    model: glm-4.5v
+    # Active since slice 8, on the FREE glm-4.6v-flash. Same pattern extraction and
+    # adjudication both follow: tune on free, upgrade only if quality proves inadequate
+    # on real material -- a decision made after watching it run, not before.
+    #
+    # NOT glm-4.5v, which slice 2 reserved. That entry went stale: 4.5v is superseded and
+    # costs $0.60/$1.80, twice the current paid model for an older one. Config written a
+    # slice ahead is reviewed and visible (ADR-008 §2) but not automatically still right
+    # when its slice finally lands -- re-check the model, not just the price.
+    #
+    # The upgrade path, if free-flash OCR mangles real German scans: glm-4.6v at
+    # $0.30/$0.90, priced in the table above so the switch is one line. Judge it on
+    # umlauts and ß specifically -- that is where OCR fails in ways that survive a glance
+    # (Bäckerei -> Backerei), and the OCR checkpoint exists to catch exactly that.
+    #
+    # Vision runs per SOURCE rather than per decision, so the cache matters more here
+    # than anywhere since slice 2 -- and it will matter for money the day this goes paid.
+    # An image is keyed by sha256 of its bytes (ADR-015): re-ingesting the same scan is
+    # free, and two different scans can never collide onto one transcription.
+    #
+    # max_tokens is generous because the answer is a full page of German prose, and a
+    # truncated transcription is the dangerous failure: it reads as complete OCR.
+    # _vision.parse treats finish_reason == "length" as a failed call for that reason.
+    status: active
+    model: glm-4.6v-flash
     max_tokens: 8192
+    fallback: { provider: deepseek, model: deepseek-chat }
 
   embeddings: # SPEC §9 + ADR-004 -- ALWAYS local, never an API. Slice 4.
     # Active since slice 4, together with the `local` pricing entry above.

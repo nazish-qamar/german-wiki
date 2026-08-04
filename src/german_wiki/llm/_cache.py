@@ -4,10 +4,18 @@ The tuning phase re-runs the pipeline over the same sources dozens of times.
 Uncached that multiplies token spend by roughly 50x; this cache is what keeps the
 project inside its budget, and it is why slice 2 comes before slice 3 (SPEC §11).
 
-**What the key covers** is the whole design. It is the request as the provider
-would see it -- provider, model, messages, sampling parameters, response format,
-seed -- plus a ``prompt_version`` escape hatch for invalidating entries when a
-downstream parser changes but the prompt text does not.
+**What the key covers** is the whole design: provider, model, messages, sampling
+parameters, response format and seed -- plus a ``prompt_version`` escape hatch for
+invalidating entries when a downstream parser changes but the prompt text does not.
+
+The governing rule is *the key contains everything that affects the response*. Until
+slice 8 that was identical to "the request as the provider sees it", and the two are
+now distinguished in exactly one place: an attached **image is keyed by
+``sha256`` of its bytes** rather than by its base64 rendering (``_redact_images``,
+ADR-015). Different images still produce different keys -- injectively, which is the
+property that matters -- but the entry stays kilobytes instead of megabytes and does
+not become a third copy of data that lives in ``/raw``. Text-only requests are
+unaffected and hash exactly as they always have.
 
 **What it deliberately excludes** is the pipeline step. Two steps issuing a
 byte-identical request should share an entry, and renaming a step must not cost
@@ -22,6 +30,7 @@ degrades to a cache miss, because a broken cache must never break a run.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -44,11 +53,53 @@ SUBDIR = "llm"
 REQUIRED_KEYS = frozenset({"key", "request", "text", "usage"})
 
 
+_DATA_URI_PREFIX = "data:"
+
+
+def _redact_images(messages: list[dict]) -> list[dict]:
+    """Replace inline image data with ``sha256`` of its bytes (slice 8, ADR-015).
+
+    The governing rule is unchanged: **the key must contain everything that affects the
+    response.** An image plainly does -- two scans under one instruction are two different
+    requests, and hashing only the text would collide them and serve image A's
+    transcription for image B. That is the failure this function exists to prevent.
+
+    What it changes is the *form*: the key needs a stable **identifier** for the image,
+    and the bytes add nothing to "have I seen this request" that their hash does not.
+    Substituting the hash avoids three real costs -- megabytes of base64 duplicated into
+    ``.cache/`` per page, a stored entry that is an unreadable base64 wall, and a third
+    copy of image data that is authoritatively in ``/raw`` (SPEC §1.2).
+
+    This is a documented departure from the docstring above: the key no longer literally
+    mirrors the wire request. It still covers it, injectively. See ADR-015.
+
+    Text-only messages pass through untouched and hash exactly as they always have, so no
+    existing entry is invalidated.
+    """
+    redacted: list[dict] = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            redacted.append(message)  # ordinary text message -- byte-identical
+            continue
+        parts = []
+        for part in content:
+            url = (part.get("image_url") or {}).get("url", "") if isinstance(part, dict) else ""
+            if url.startswith(_DATA_URI_PREFIX):
+                payload = url.split(",", 1)[-1].encode()
+                digest = hashlib.sha256(base64.b64decode(payload)).hexdigest()
+                parts.append({"type": "image_url", "sha256": digest})
+            else:
+                parts.append(part)
+        redacted.append({**message, "content": parts})
+    return redacted
+
+
 def key_material(
     *,
     provider: str,
     model: str,
-    messages: list[dict[str, str]],
+    messages: list[dict],
     temperature: float | None,
     max_tokens: int | None,
     response_format: dict[str, Any] | None = None,
@@ -60,7 +111,7 @@ def key_material(
         "v": KEY_VERSION,
         "provider": provider,
         "model": model,
-        "messages": messages,
+        "messages": _redact_images(messages),
         "temperature": temperature,
         "max_tokens": max_tokens,
         "response_format": response_format,
