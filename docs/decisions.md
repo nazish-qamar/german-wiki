@@ -1014,3 +1014,109 @@ reports success while writing nothing.
   an accidental paid-model drag is a real cost leak.
 - *Spelling out every cell "for completeness"* — invents vocabulary the tool cannot verify.
 - *Wiring §7.2's ingest hook now* — automation before observation, which no prior slice did.
+
+---
+
+## ADR-015 — Slice 8: vision ingestion, and what a cache key means when the input is bytes
+
+**Decided:** images and PDFs enter through the *existing* pipeline, not beside it. SPEC §2
+starts `Input (image / PDF / text / audio) → OCR/ASR → Extraction → …`, and slices 3–7
+built everything from Extraction onward; this slice adds only the missing front end. Six
+decisions are worth not re-litigating.
+
+**1. An image reaches the provider through `Prompt.images`, not a second code path.**
+`to_messages()` returns plain-string content when `images == []` — byte-identical to what
+it returned before, so **no existing cache entry was invalidated** — and a content array
+otherwise, text first and image last (SPEC §10's fixed-before-variable ordering, one layer
+down). Vision is therefore an ordinary `complete("vision", prompt)` call and inherits the
+disk cache, the cost ledger, per-step routing, and the `finish_reason == "length"` guard.
+A parallel vision client would have had to re-implement all four, or silently skip them.
+
+**2. The cache key redacts images to `sha256(bytes)`. This departs from ADR-008 §1.**
+ADR-008 §1 says the key covers the request *as the provider sees it*. Here it does not:
+`_redact_images` replaces each `image_url` data URI with `{"type": "image_url", "sha256":
+…}` in both the hashed key material and the stored `request`, so the existing
+`expect_request` corruption check keeps working. The full data URI goes only over the wire.
+
+The departure is deliberate, and ADR-005's own rule is what justifies it — *the key must
+contain everything that affects the response*. What affects the response is the image's
+**identity**, which the hash carries exactly; the bytes add nothing to "have I seen this
+request before". Keying on the prompt text alone would have been catastrophic: two
+different scans under one instruction would collide onto a single entry and serve image
+A's transcription for image B. Redaction also avoids ~4 MB of base64 per page in
+`.cache/`, an entry that is an unreadable base64 wall, and a **third copy** of image data
+that `/raw` already owns authoritatively (SPEC §1.2) — the duplicate-source-of-truth
+pattern this project keeps refusing. The hash is taken over the raw bytes and computed
+identically at write and read, so the same image deterministically hits.
+
+**3. Each PDF page is its own source.** Two independent reasons, either sufficient. SPEC
+§8.1 requires provenance to point at the *"source image/page"* — a node citing a 40-page
+PDF fails that test; one citing page 12 passes it. And the extraction cap is **per
+source**: ADR-006's guardrail is 5–8 candidates, warn and keep the first 8, so a 20-page
+chapter ingested as one source would either silently drop most of the chapter or force 20
+pages into 8 thin nodes — the atomizing-rather-than-conceptualizing failure that cap exists
+to catch, inverted. Ids extend slice 3's scheme with a page marker (`…-kapitel3-p1-9f2c4e1a`),
+which also disambiguates genuinely identical pages: two blank pages hash the same, and a
+bare content hash could not tell them apart.
+
+**4. PDFs are read through their text layer; scanned PDFs are refused, not rasterized.**
+A PDF is really two input types. `pypdf` extracts an embedded text layer losslessly at
+**$0** — OCR'ing text that is already sitting in the file would be slower, costlier and
+*worse*. A PDF with no text layer is refused with an actionable message pointing at the
+image path this slice builds, so scanned material stays reachable via one manual step
+rather than being impossible. PyMuPDF was rejected: a ~20 MB binary wheel, and it would
+have routed text-based PDFs to a paid model to re-read text that was free.
+
+`MIN_PAGE_CHARS` and `MIN_TEXT_PAGE_RATIO` are **guessed, not measured** — no real German
+textbook PDF informed them — which is exactly why they sit on `ingest`'s public surface
+next to `MAX_IMAGE_BYTES`, by the same convention as `embed.GRAY_LOW`. Partial text is
+treated as neither extreme: extract what exists, and flag any page yielding nothing as
+probably-scanned rather than ingesting silence that looks like success.
+
+**5. OCR text is checkpointed before it is frozen; the image is not.** `/raw` is immutable
+(SPEC §1.2) *and* is §12.1's re-verification anchor — the thing a drifted node is checked
+against. An OCR error frozen there is worse than a bad node: it corrupts the reference you
+would use to *detect* the bad node. German OCR fails in ways that survive a glance
+(`Bäckerei` → `Backerei`, `ß` → `B`/`ss`, capital `I` ↔ `l`, dropped final `-n`), and
+`Backerei` reads as a plausible word until you check the scan.
+
+Slice 3's ordering principle still holds — *the raw record never depends on the model
+succeeding* — because for vision the **image is the true source and the text is a
+derivation**:
+
+```
+1. write raw/<id>.png       immediately, before any model call
+2. vision -> text           paid, cached
+3. accept / edit / reject   --yes skips
+4. write raw/<id>.txt       only on accept, immutable thereafter
+5. write raw/<id>.json      sidecar last, as slice 3 does
+```
+
+The sidecar records `ocr_edited` and `ocr_sha256` of the model's *original* output, so a
+hand-corrected transcription stays auditable without a third file. Editing changes the
+text, hence the extraction cache key, hence re-extraction — correctly. Rejecting freezes
+nothing, keeps the image, and retry is free because the call is cached.
+
+**6. Vision routes to free `glm-4.6v-flash` — and config reserved a slice ahead goes
+stale.** Same tune-on-free pattern as extraction and adjudication: the upgrade path
+(`glm-4.6v`, $0.30/$0.90, verified) is priced in the table so switching is one line, judged
+on umlauts and ß specifically because that is where OCR fails invisibly.
+
+The lesson worth keeping is the reservation itself. Slice 2 reserved `glm-4.5v` at
+`status: planned`. By the time slice 8 landed, 4.5v was **superseded and pricier** —
+$0.60/$1.80, twice the current paid model for an older one. ADR-008 §2's claim that
+reserved config is *reviewed and visible* remains true, but visible is not the same as
+still-correct when its slice finally arrives: **re-check the model, not just the price**,
+at the moment a step goes active. 4.5v is deliberately left out of the pricing table, so
+routing back to it reports unpriced and warns.
+
+**Rejected:**
+- *A separate vision client* — four inherited behaviours re-implemented or silently skipped.
+- *Embedding base64 in the cache key* — a third copy of data `/raw` already owns, on a
+  disk-constrained machine.
+- *Keying vision on the prompt text alone* — two scans collide and one gets the other's OCR.
+- *One source per PDF document* — breaks §8.1 provenance and silently drops pages to the cap.
+- *Rasterizing scanned PDFs with PyMuPDF* — a 20 MB binary for a case one manual step covers.
+- *Freezing OCR text without a checkpoint* — corrupts the very anchor used to detect drift.
+- *Resizing oversized images* — changes the bytes `/raw` records and the cache keys on;
+  they are refused with their size instead.
