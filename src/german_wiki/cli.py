@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Optional
 
+import click
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -384,7 +385,14 @@ def _ocr_checkpoint(transcription: str, image_path: Path) -> str | None:
     # Hand it to $EDITOR rather than asking for a paste: a page of German prose is not
     # something to retype at a prompt, and the queue-file idiom (ADR-009) is already
     # "review needs nothing but an editor".
-    edited = typer.edit(transcription, extension=".txt")
+    #
+    # `click.edit`, not `typer.edit` -- typer is a click wrapper and does not re-export
+    # this one. click is typer's own hard dependency, so this is the supported route
+    # rather than a reach into something unrelated.
+    #
+    # `require_save=True` (the default) returns None when you close without saving, which
+    # is why that case is distinguishable from an empty edit below.
+    edited = click.edit(transcription, extension=".txt")
     if edited is None:
         console.print("[dim]editor closed without saving — keeping the original[/]")
         return transcription

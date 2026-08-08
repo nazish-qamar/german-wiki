@@ -28,3 +28,5 @@ queue/
 # directory only ever holds pending work. The durable record of what happened is
 # the commit to /nodes that an approval produces, plus logs/decisions.jsonl.
 proposals/
+uploads/
+raw/
