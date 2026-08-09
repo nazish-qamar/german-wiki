@@ -30,3 +30,6 @@ queue/
 proposals/
 uploads/
 raw/
+# Derived, regenerable from /nodes by `gw anki` — the deck is not the record, the
+# nodes are. Same reasoning as data/*.db and the caches above.
+exports/

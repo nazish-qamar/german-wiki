@@ -21,7 +21,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import config, embed, index, ingest, level, llm, merge, morph, storage, vocab
+from . import anki, config, embed, index, ingest, level, llm, merge, morph, storage, vocab
 from .db import connect
 
 app = typer.Typer(add_completion=False, help="German Wiki — node layer CLI.")
@@ -936,13 +936,9 @@ def relevel(
         console.print(f"[dim]{node_id}: already correct, nothing proposed[/]")
     for node_id in result.unresolved:
         # Honest gap rather than a guessed level -- the whole point of the slice.
-        err_console.print(
-            f"[yellow]{node_id}:[/] no rule matched and the tiebreak was disabled"
-        )
+        err_console.print(f"[yellow]{node_id}:[/] no rule matched and the tiebreak was disabled")
     if result.proposals:
-        console.print(
-            "[dim]Nothing written to /nodes.[/] Approve with [bold]gw review[/]"
-        )
+        console.print("[dim]Nothing written to /nodes.[/] Approve with [bold]gw review[/]")
 
 
 @app.command()
@@ -979,7 +975,11 @@ def _print_diff(before: str, after: str, *, from_label: str, to_label: str) -> N
     """The before/after body diff -- the reviewer's primary merge-drift guard (SPEC §12.1)."""
     lines = list(
         difflib.unified_diff(
-            before.splitlines(), after.splitlines(), fromfile=from_label, tofile=to_label, lineterm=""
+            before.splitlines(),
+            after.splitlines(),
+            fromfile=from_label,
+            tofile=to_label,
+            lineterm="",
         )
     )
     if not lines:
@@ -1120,9 +1120,13 @@ def review(
         if yes:
             answer = "a"
         else:
-            answer = typer.prompt(
-                "\n[a]pprove / [r]eject / [s]kip / [q]uit", default="s", show_default=True
-            ).strip().lower()[:1]
+            answer = (
+                typer.prompt(
+                    "\n[a]pprove / [r]eject / [s]kip / [q]uit", default="s", show_default=True
+                )
+                .strip()
+                .lower()[:1]
+            )
 
         if answer == "q":
             console.print("[dim]stopped; the rest stay pending[/]")
@@ -1361,20 +1365,14 @@ def families(
             if (path := staged_paths.get(proposal.candidate)) is not None:
                 # Point at the staged file and drop the duplicate body: that file is the
                 # single source of truth for display, edit and write (ADR-011, amended).
-                proposal = proposal.model_copy(
-                    update={"candidate_path": str(path), "body_md": ""}
-                )
+                proposal = proposal.model_copy(update={"candidate_path": str(path), "body_md": ""})
             table.add_row(proposal.id, proposal.kind, proposal.candidate, proposal.reason)
             merge.write_proposal(proposal, proposals_dir=proposals_dir)
         console.print(table)
         if staged_paths:
             console.print(f"[dim]{len(staged_paths)} new node(s) staged -> {staged_dir}[/]")
-        console.print(
-            f"[bold]{len(analysis.proposals)}[/] proposal(s) -> [dim]{proposals_dir}[/]"
-        )
-        console.print(
-            "[dim]Nothing written to /nodes.[/] Run [bold]gw review[/] to decide them."
-        )
+        console.print(f"[bold]{len(analysis.proposals)}[/] proposal(s) -> [dim]{proposals_dir}[/]")
+        console.print("[dim]Nothing written to /nodes.[/] Run [bold]gw review[/] to decide them.")
 
     if analysis.ambiguous:
         console.print(
@@ -1383,6 +1381,86 @@ def families(
         )
     if analysis.judged:
         console.print(f"[dim]{analysis.judged} transparency judgment(s) on the free model[/]")
+
+
+@app.command("anki")
+def anki_export(
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Where to write the .apkg."),
+    include_draft: bool = typer.Option(
+        False, "--include-draft", help="Also export nodes that have not been reviewed."
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report only; write no file."),
+    nodes_dir: Path = typer.Option(config.NODES_DIR, "--nodes-dir", help="Node directory."),
+) -> None:
+    """Export /nodes to an Anki deck (SPEC §8.1). Reads only; /nodes is never touched.
+
+    Re-running is a sync, not a duplication: every note carries a content-derived GUID, so
+    importing a later export updates the cards you already have and adds the new ones,
+    keeping their scheduling history.
+    """
+    statuses = anki.EXPORT_STATUSES + ("draft",) if include_draft else anki.EXPORT_STATUSES
+    nodes = storage.load_all_nodes(nodes_dir)
+    if not nodes:
+        console.print(f"No nodes in {nodes_dir}.")
+        raise typer.Exit(1)
+
+    path = output or (config.EXPORTS_DIR / "german-wiki.apkg")
+    result = (
+        anki.build(nodes, statuses=statuses)
+        if dry_run
+        else anki.export(nodes, path, statuses=statuses)
+    )
+
+    by_node: dict[str, list] = {}
+    for card in result.cards:
+        by_node.setdefault(card.node_id, []).append(card)
+
+    if by_node:
+        table = Table(show_lines=False, title=anki.DECK_NAME, title_style="bold")
+        for col in ("node", "cards", "kinds"):
+            table.add_column(col)
+        for node_id, cards in sorted(by_node.items()):
+            kinds = ", ".join(sorted({card.kind for card in cards}))
+            table.add_row(node_id, str(len(cards)), f"[dim]{kinds}[/]")
+        console.print(table)
+
+    # The skips are the useful half of this output: each one names something only a human
+    # can fix, in the node itself.
+    if result.skips:
+        console.print()
+        table = Table(show_lines=False, title="No card, and why", title_style="bold")
+        for col in ("node", "reason", "what to do"):
+            table.add_column(col)
+        for skip in result.skips:
+            table.add_row(f"[yellow]{skip.node_id}[/]", skip.reason, _SKIP_ADVICE[skip.reason])
+        console.print(table)
+
+    if result.excluded:
+        console.print()
+        held = ", ".join(
+            f"{item.node_id} ({item.status})"
+            for item in sorted(result.excluded, key=lambda item: item.node_id)
+        )
+        console.print(f"[dim]Held back by status: {held} — use --include-draft to add.[/]")
+
+    console.print()
+    console.print(f"[bold]{len(result.cards)}[/] card(s) from {len(result.node_ids)} node(s).")
+    if dry_run:
+        console.print("[dim]--dry-run: nothing written.[/]")
+    else:
+        console.print(f"[dim]Wrote {path}[/]")
+        console.print(
+            "[dim]Import adds and updates; it never deletes. A card whose example you "
+            "removed stays until you delete it — find it by its [bold]node::[/] tag.[/]"
+        )
+
+
+# What a skip means in terms of an edit you can make. Reasons come from `anki.Skip`.
+_SKIP_ADVICE = {
+    "no-examples": "add a ## Examples section",
+    "no-cloze-target": "mark the construction with **bold**",
+    "no-prompt-for-full-cloze": "add a (gloss) — an all-bold sentence has no front",
+}
 
 
 if __name__ == "__main__":
