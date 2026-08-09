@@ -18,6 +18,12 @@ dependencies = [
     # deliberately not taken on: a scanned PDF is refused and pointed at the image path
     # (ADR-015). Most course material has a text layer, which is free to read.
     "pypdf==6.1.1",
+    # Slice 9a. Writes .apkg for `gw anki`. Pure-Python wheel; pulls cached-property,
+    # frozendict and chevron (pyyaml is already here). Chosen over a TSV export for ONE
+    # reason: .apkg carries a per-note GUID, so re-exporting a wiki that has grown updates
+    # existing cards instead of duplicating them -- which is what preserves the scheduling
+    # history that is the entire point of exporting to a scheduler (ADR-016).
+    "genanki==0.13.1",
 ]
 
 [project.optional-dependencies]
@@ -38,4 +44,23 @@ addopts = "-q"
 markers = [
     "live: hits a real model API; needs GW_LIVE_TESTS=1 and an API key",
     "slow: downloads and runs the local embedding model; needs GW_MODEL_TESTS=1",
+]
+
+# ONE warning, silenced as narrowly as the syntax allows -- matched on its message AND the
+# module that raises it, so our own DeprecationWarnings stay visible. A blanket
+# `ignore::DeprecationWarning` would hide exactly the signal this project would want.
+#
+# What it is: genanki imports the `cached_property` BACKPORT (obsolete since 3.8, when
+# functools grew its own), whose __get__ calls asyncio.iscoroutinefunction on every
+# attribute access -- ~128 warnings per test run, enough noise to bury a real one.
+#
+# THE DEADLINE, which is why this is a comment and not just a filter: that function is
+# *removed* in Python 3.16, so this is a future breakage rather than cosmetic noise.
+# cached-property 2.0.1 (Oct 2024) declares support only through 3.13; we already run 3.14.
+# The exposure is two properties -- genanki's `Model._req` and `Note.cards`, both plain sync
+# methods on classes without __slots__ -- so functools.cached_property is a drop-in whenever
+# a fix is wanted. Re-check before upgrading to 3.16: if neither package has moved, the
+# options are a shim, a fork, or a different writer.
+filterwarnings = [
+    "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning:cached_property",
 ]

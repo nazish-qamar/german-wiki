@@ -55,7 +55,16 @@ def fold(text: str) -> str:
     return unicodedata.normalize("NFC", text).strip().casefold()
 
 
-def _lemma_key(lemma: str) -> str:
+def lemma_key(lemma: str) -> str:
+    """A lemma reduced to the form the corpus indexes it under.
+
+    ``die Wäsche`` -> ``wäsche``, ``sich waschen`` -> ``waschen``: the article and the
+    reflexive pronoun are inflection, not the word.
+
+    Public because slice 9a's Anki export needs the *same* key to ask a different question
+    -- "does this node's own lemma appear in this example sentence?" -- and a second copy
+    of the noise list would silently disagree the day one of them gained an entry.
+    """
     folded = fold(lemma)
     for noise in _LEMMA_NOISE:
         folded = folded.removeprefix(noise)
@@ -112,7 +121,7 @@ class CorpusIndex(BaseModel):
         stems: dict[str, str] = {}
         for node in nodes:
             for lemma in node.lemmas or []:
-                if key := _lemma_key(lemma):
+                if key := lemma_key(lemma):
                     stems.setdefault(key, node.id)
         for node in nodes:  # second pass so roots overwrite lemma-derived entries
             if node.root and (key := fold(node.root)):

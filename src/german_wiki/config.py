@@ -64,3 +64,8 @@ DECISIONS_LOG_PATH = _path_env("GW_DECISIONS_LOG", LOGS_DIR / "decisions.jsonl")
 # README; the *.txt data inside is gitignored because Goethe/DWDS lists cannot be
 # redistributed. Absent lists are a supported state -- see level/_lexical.py.
 CEFR_DIR = _path_env("GW_CEFR_DIR", VOCAB_DIR / "cefr")
+
+# --- slice 9a: Anki export ---
+# Where `gw anki` writes its .apkg. Gitignored, like data/*.db and the caches: it is a
+# derived artifact regenerable from /nodes at any time, and the nodes are what git tracks.
+EXPORTS_DIR = _path_env("GW_EXPORTS_DIR", PROJECT_ROOT / "exports")

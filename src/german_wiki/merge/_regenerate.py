@@ -35,13 +35,13 @@ is the opposite of the constraint.
 from __future__ import annotations
 
 import json
-import re
 import unicodedata
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from ..bodytext import example_lines
 from ..llm import JSON_OBJECT, ChatClient, ModelResponse, Prompt, ShotPair, complete, strip_fences
 from ..logutil import get_logger
 from ..models import Node
@@ -149,40 +149,12 @@ def check_cap(
 
 
 # --- example sentences: extraction and sourcing ---
-
-_EXAMPLES_HEADING = re.compile(r"^#{1,6}\s*(examples|beispiele)\b", re.IGNORECASE)
-_HEADING = re.compile(r"^#{1,6}\s")
-_BULLET = re.compile(r"^\s*[-*+]\s+")
-_TRAILING_TAGS = re.compile(r"\s*\[[^\[\]]*\]\s*$")
-_TRAILING_GLOSS = re.compile(r"\s*\([^()]*\)\s*$")
-
-
-def example_lines(body_md: str) -> list[str]:
-    """The German example sentences in a body's ``## Examples`` section.
-
-    Scoped to that section on purpose. The extraction prompt mandates the shape
-    (``- German sentence (English gloss)``), and prose elsewhere in a body is
-    explanation, which is legitimately paraphrased on merge. Example sentences are where
-    invention actually hurts -- a fabricated sentence is a fact you would memorize.
-    """
-    out: list[str] = []
-    in_section = False
-    for line in body_md.splitlines():
-        if _EXAMPLES_HEADING.match(line.strip()):
-            in_section = True
-            continue
-        if in_section and _HEADING.match(line.strip()):
-            in_section = False
-            continue
-        if not in_section or not _BULLET.match(line):
-            continue
-
-        text = _BULLET.sub("", line).strip()
-        text = _TRAILING_TAGS.sub("", text)  # [alltag, du-Ebene]
-        text = _TRAILING_GLOSS.sub("", text)  # (English gloss)
-        if text.strip():
-            out.append(text.strip())
-    return out
+#
+# The parse itself lives in `bodytext`, because slice 9a's Anki export needs the same
+# lines with the parts this module discards -- the gloss goes on a card's back, the tags
+# become Anki tags. Re-implementing the bullet format there would have given one line
+# shape two definitions that drift apart silently. Re-exported rather than merely imported
+# so `_regenerate.example_lines` keeps working for `_graph` and the existing tests.
 
 
 def _fold(text: str) -> str:

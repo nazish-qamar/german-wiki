@@ -49,7 +49,7 @@ from ._grid import (
     morpheme_of,
 )
 from ._prefixes import INSEPARABLE, SEPARABLE, VARIABLE, Separability, candidates, classify
-from ._segment import CorpusIndex, Segmentation, Withheld, segment
+from ._segment import CorpusIndex, Segmentation, Withheld, fold, lemma_key, segment
 from ._transparency import TRUSTED, Transparency, TransparencyError, judge
 
 __all__ = [
@@ -75,9 +75,14 @@ __all__ = [
     "candidates",
     "classify",
     "dangling_targets",
+    # The two normalizations, public because the Anki export matches a node's own lemmas
+    # against its example sentences and must fold them the identical way (ADR-012's
+    # two-encodings problem applies to both).
+    "fold",
     "is_family_node",
     "is_prefix_node",
     "judge",
+    "lemma_key",
     "morpheme_of",
     "segment",
 ]
