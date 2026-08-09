@@ -32,9 +32,13 @@ EXPECTED = {
     "candidates",
     "classify",
     "dangling_targets",
+    # Published in slice 9a: the Anki export matches a node's lemmas against its own
+    # example sentences, which has to fold text the same way the corpus index does.
+    "fold",
     "is_family_node",
     "is_prefix_node",
     "judge",
+    "lemma_key",
     "morpheme_of",
     "segment",
 }
