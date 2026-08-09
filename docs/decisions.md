@@ -1120,3 +1120,118 @@ routing back to it reports unpriced and warns.
 - *Freezing OCR text without a checkpoint* — corrupts the very anchor used to detect drift.
 - *Resizing oversized images* — changes the bytes `/raw` records and the cache keys on;
   they are refused with their size instead.
+
+---
+
+## ADR-016 — Slice 9a: Anki export, where a note's identity is the whole design
+
+**Decided:** SPEC §8.1's export ships as `gw anki`, writing one `.apkg`. It is the first
+feature since slice 3 that **never writes to `/nodes`**, so ADR-003's review gate appears
+nowhere in it — enforced structurally, by the package having no write path at all, and
+pinned by a test rather than left as a convention.
+
+Slice 9+ in SPEC §11 is one row covering five unrelated features. It is **not** one slice:
+priority scoring, gap detection, the error log and RAG chat are independent and get their
+own. This ADR covers the export only.
+
+**1. Anki before priority scoring, because two of §5.1's three inputs do not exist.**
+The formula is `freq_rank_score × (1 if cefr <= target_level else decay) × (1 + n_dependents)`.
+Measured against the corpus rather than assumed: `freq_rank_score` has no data (ADR-013
+shipped `vocab/cefr/` as a seam and no wordlist has landed); `n_dependents` is **0 for every
+node**, because all five `prerequisite_for` links point at nodes that do not exist yet; and
+`target_level` is not a config key. Two of three factors are constants, so the ranking would
+be CEFR order over six nodes — SPEC §12.2's named failure mode, with a formula on top.
+Priority scoring is a good feature waiting on its inputs. Export is the feature that
+produces the daily use §12.2 requires before any more are built.
+
+**2. `.apkg` over TSV, for note identity and nothing else.** genanki is a pure-Python wheel
+adding three small transitive packages. TSV is zero-dependency, diffable and greppable, and
+would have been the cheaper-looking choice.
+
+It loses on the tenth export, not the first. A wiki is built once and **grown continuously**,
+so the export is re-run often; TSV has no note identity, so each re-import either duplicates
+the collection or needs the note type hand-built and the column mapping re-picked. `.apkg`
+carries an explicit GUID per note, which makes re-export an **idempotent sync**: existing
+cards update in place and new ones are added, keeping the scheduling history that is the
+entire reason for exporting to a scheduler at all. That is the same derived-and-rebuildable
+discipline as `gw reindex`, and `exports/` is gitignored for the same reason `data/*.db` is.
+
+**3. Note identity is content-derived, never positional — and this is the load-bearing
+decision.** `guid = guid_for(node.id, guid_fold(sentence))`. A per-node id alone would
+collide, since one node yields several notes. The discriminator had two candidates:
+
+| Discriminator | Survives | Breaks on |
+|---|---|---|
+| position (`node.id#0`) | typo fixes | **insert / reorder** |
+| folded sentence text | insert, reorder, retagging | editing that sentence |
+
+Content wins on this codebase's own evidence: `merge.new_examples()` **appends** the loser's
+examples to the winner on every SAME merge, so insertion into an Examples section is a
+routine pipeline event, not a rare hand edit. Positional ids would discard review history
+each time a merge happened.
+
+`_cards.guid_fold` is therefore **the opposite of a dial and must never change** — any edit
+re-identifies every note in the deck. It is deliberately *not* shared with `merge._fold` or
+`morph.fold`, which look similar and answer different questions (the separation ADR-010 drew
+for `embed`'s two normalizations): those are free to be tuned as their callers learn, and
+coupling them would mean a merge-sensitivity tweak silently orphaning the deck.
+
+The deck and note-type integer ids are fixed constants for the same reason, with the literal
+values asserted in a test. Generating them per run is the documented genanki mistake: every
+export declares a new note type and the previous cards become orphans.
+
+**4. The cloze target is structural, and refuses rather than guesses.** Three rungs:
+`**bold**` (the author's assertion, always wins) → the node's own structured content →
+**no card, reported**.
+
+Rung 2 is per type and reads assertions, never infers facts — ADR-014's rule for grid
+columns applied to sentences. A `vocab` node blanks its own `lemmas`/`root`; a `grammar`
+node blanks only prepositions it has explicitly annotated with a case (`teilnehmen an (+
+Dativ)`), filtered through a closed inventory. So `Ich warte {{c1::auf}} die Entscheidung
+vom Chef` blanks `auf` and leaves `vom` alone, because the node claimed something about
+`auf` and nothing about `vom`.
+
+**No inflection matching, deliberately.** `wasche` does not match the lemma `waschen`, and
+`wäschst` would need ablaut folding (a→ä) that introduces false stem matches. A wrong
+deletion is the one defect here that never announces itself — the card looks real, enters
+the rotation, and teaches nothing or something false — so an example with no honest target
+gets no card and is reported instead. This is the single decision in the slice that is *not*
+cheap to reverse later, which is why it is the strict one.
+
+An early plan named `morph.segment()` for the inflection step. That was simply the wrong
+tool: it does prefix decomposition (`abwaschen` → `ab` + `waschen`) and returns
+`Withheld(reason="no-prefix")` for `wasche`. What is reused is the normalization —
+`morph.fold` and `morph.lemma_key`, promoted to the public surface for it.
+
+**5. Everything else is a named dial, because the deck has not been studied yet.**
+`CARD_FORMATS` maps node type → card generators (`grammar` gets both a rule card and its
+example clozes; `pattern` gets a rule card, which is what stops `prefix-ab` from exporting
+nothing). `EXPORT_STATUSES` excludes `draft`, overridable with `gw anki --include-draft`.
+Both sit on the public surface by the `embed.GRAY_LOW` / `ingest.MIN_PAGE_CHARS` convention,
+and a test asserts `CARD_FORMATS` covers every `NodeType` literal so a sixth type fails there
+rather than `KeyError`-ing mid-export.
+
+**6. Two failures are made visible rather than smoothed over.** An `.apkg` import adds and
+updates but **never deletes**, so removing an example leaves an orphan card; every note
+carries a `node::<id>` tag to make orphans findable, and the limit is stated in the CLI
+output instead of being discovered later. And the Markdown→HTML converter handles four
+constructs (bold, italic, pipe tables, breaks) as a *transformation pipeline over the whole
+text* rather than a parser — text is only ever rewritten in place, never selected for
+output — so an unhandled construct survives as literal Markdown. Ugly and complete beats
+pretty and lossy: dropping a construct from a rule card is the same failure as truncating
+it, minus the visible gap. A token-level no-drop invariant pins it against constructs the
+corpus does not contain yet.
+
+**Rejected:**
+- *One "slice 9"* — five unrelated features; each earns its own slice and its own decision.
+- *Priority scoring first* — two of three inputs are missing, so it would rank six nodes by
+  CEFR and call it a queue.
+- *TSV export* — cheaper today, duplicates the collection on every re-import forever.
+- *Runtime-generated deck/model ids* — orphans the entire collection on the second export.
+- *Sharing `guid_fold` with `merge._fold`* — couples note identity to an unrelated tuning dial.
+- *Guessing a cloze target when none is marked* — the one failure mode here that is silent.
+- *Inflection or stem matching for lemmas* — false matches produce confidently wrong cards.
+- *Mining Markdown tables into vocab cards* — the corpus has three table shapes and
+  `um-hilfe-bitten`'s first column is not German; the failure is a card with an English front.
+- *A full Markdown dependency* — a fourth package for four constructs (cf. PyMuPDF, ADR-015).
+- *Truncating long rule-card backs* — silently drops the rule the card exists to teach.
