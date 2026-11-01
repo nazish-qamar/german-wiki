@@ -14,7 +14,6 @@ import difflib
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Optional
 
 import click
 import typer
@@ -72,11 +71,11 @@ def reindex(
 
 @app.command("list")
 def list_nodes(
-    cefr: Optional[str] = typer.Option(None, "--cefr", help="Filter by CEFR level, e.g. A2."),
-    type: Optional[str] = typer.Option(
+    cefr: str | None = typer.Option(None, "--cefr", help="Filter by CEFR level, e.g. A2."),
+    type: str | None = typer.Option(
         None, "--type", help="Filter by type: grammar|vocab|phrase|pattern|culture."
     ),
-    theme: Optional[str] = typer.Option(None, "--theme", help="Filter by theme tag, e.g. küche."),
+    theme: str | None = typer.Option(None, "--theme", help="Filter by theme tag, e.g. küche."),
     db: Path = typer.Option(config.DB_PATH, "--db", help="SQLite index path."),
     nodes_dir: Path = typer.Option(
         config.NODES_DIR, "--nodes-dir", help="Node dir (for the staleness check)."
@@ -142,8 +141,8 @@ def _row(label: str, bucket: dict) -> list[str]:
 
 @app.command()
 def cost(
-    since: Optional[str] = typer.Option(None, "--since", help="ISO date, e.g. 2026-07-01."),
-    by: Optional[str] = typer.Option(None, "--by", help=f"Group by: {'|'.join(GROUP_BY)}."),
+    since: str | None = typer.Option(None, "--since", help="ISO date, e.g. 2026-07-01."),
+    by: str | None = typer.Option(None, "--by", help=f"Group by: {'|'.join(GROUP_BY)}."),
     log: Path = typer.Option(config.USAGE_LOG_PATH, "--log", help="Usage ledger (JSONL) path."),
 ) -> None:
     """Token counts and estimated cost for model calls, with a running total."""
@@ -246,7 +245,7 @@ def cache_stats(
 def cache_clear(
     yes: bool = typer.Option(False, "--yes", help="Required. Deletes cache entries."),
     kind: str = typer.Option("all", "--kind", help=f"Which cache: {'|'.join(CACHE_KINDS)}|all."),
-    older_than_days: Optional[int] = typer.Option(
+    older_than_days: int | None = typer.Option(
         None, "--older-than-days", help="Only remove entries older than N days."
     ),
     cache_dir: Path = typer.Option(config.CACHE_DIR, "--cache-dir", help="Cache root."),
@@ -609,7 +608,7 @@ def _require_index(db: Path):
     return conn
 
 
-def _queued_nodes(queue_dir: Path, source_id: Optional[str]) -> list:
+def _queued_nodes(queue_dir: Path, source_id: str | None) -> list:
     """Load queued candidates as Nodes -- they are complete node files (slice 3)."""
     pending = ingest.list_queue(queue_dir=queue_dir)
     if source_id is not None:
@@ -655,7 +654,7 @@ def embed_cmd(  # named to avoid shadowing the `embed` package imported above
 
 @app.command()
 def dupes(
-    queue_source: Optional[str] = typer.Option(
+    queue_source: str | None = typer.Option(
         None, "--queue", help="Compare one queued source's candidates against /nodes."
     ),
     nodes_dir: Path = typer.Option(config.NODES_DIR, "--nodes-dir", help="Node directory."),
@@ -787,7 +786,7 @@ def _merge_context(
 
 @app.command()
 def adjudicate(
-    source_id: Optional[str] = typer.Argument(None, help="Source id from `gw queue`."),
+    source_id: str | None = typer.Argument(None, help="Source id from `gw queue`."),
     all_sources: bool = typer.Option(False, "--all", help="Adjudicate every queued source."),
     top: int = typer.Option(embed.DEFAULT_K, "--top", help="Neighbours considered per candidate."),
     nodes_dir: Path = typer.Option(config.NODES_DIR, "--nodes-dir", help="Node directory."),
@@ -986,7 +985,7 @@ def _print_diff(before: str, after: str, *, from_label: str, to_label: str) -> N
         console.print("[dim](no change to the body)[/]")
         return
     for line in lines:
-        if line.startswith("+++") or line.startswith("---"):
+        if line.startswith(("+++", "---")):
             console.print(f"[bold]{line}[/]")
         elif line.startswith("@@"):
             console.print(f"[cyan]{line}[/]")
@@ -1064,7 +1063,7 @@ def _reviewable_body(proposal: merge.Proposal) -> str:
 
 @app.command()
 def review(
-    proposal_id: Optional[str] = typer.Option(None, "--proposal", help="Review just this one."),
+    proposal_id: str | None = typer.Option(None, "--proposal", help="Review just this one."),
     yes: bool = typer.Option(False, "--yes", help="Approve every proposal without asking."),
     nodes_dir: Path = typer.Option(config.NODES_DIR, "--nodes-dir", help="Node directory."),
     queue_dir: Path = typer.Option(config.QUEUE_DIR, "--queue-dir", help="Review queue."),
@@ -1385,7 +1384,7 @@ def families(
 
 @app.command("anki")
 def anki_export(
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Where to write the .apkg."),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Where to write the .apkg."),
     include_draft: bool = typer.Option(
         False, "--include-draft", help="Also export nodes that have not been reviewed."
     ),

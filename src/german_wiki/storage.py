@@ -126,9 +126,9 @@ def node_to_frontmatter(
 
     # Emit in canonical order (any stray key appended after, deterministically).
     ordered = {k: meta[k] for k in _FRONTMATTER_ORDER if k in meta}
-    for k in meta:
+    for k, v in meta.items():
         if k not in ordered:
-            ordered[k] = meta[k]
+            ordered[k] = v
     return ordered
 
 

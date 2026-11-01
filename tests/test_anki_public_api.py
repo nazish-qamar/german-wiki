@@ -85,9 +85,10 @@ def _imports_genanki(path) -> bool:
     """AST, not a text search: several modules here *discuss* genanki in prose."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            if any(alias.name.split(".")[0] == "genanki" for alias in node.names):
-                return True
+        if isinstance(node, ast.Import) and any(
+            alias.name.split(".")[0] == "genanki" for alias in node.names
+        ):
+            return True
         if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "genanki":
             return True
     return False

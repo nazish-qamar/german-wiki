@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import pytest
+from conftest import SEED_IDS
 
 from german_wiki import storage
-
-from conftest import SEED_IDS
 
 
 @pytest.mark.parametrize("sid", SEED_IDS)
@@ -59,9 +60,9 @@ def test_umlauts_written_literally(seed_nodes, tmp_path, tmp_vocab):
 
 
 def test_datetime_round_trips(seed_nodes, tmp_path, tmp_vocab):
-    from datetime import datetime, timezone
+    from datetime import datetime
     node = seed_nodes["prefix-an"].model_copy(
-        update={"updated_at": datetime(2026, 1, 15, tzinfo=timezone.utc)}
+        update={"updated_at": datetime(2026, 1, 15, tzinfo=UTC)}
     )
     out = tmp_path / "prefix-an.md"
     storage.write_node(node, out, vocab_dir=tmp_vocab)

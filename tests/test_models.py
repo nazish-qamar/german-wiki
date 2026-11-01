@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import pytest
+from conftest import SEED_IDS
 from pydantic import ValidationError
 
 from german_wiki import storage
 from german_wiki.models import Node
-
-from conftest import SEED_IDS
 
 
 @pytest.mark.parametrize("sid", SEED_IDS)
