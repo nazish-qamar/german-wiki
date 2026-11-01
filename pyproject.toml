@@ -35,6 +35,10 @@ gw = "german_wiki.cli:app"
 [tool.ruff]
 line-length = 100
 
+[tool.ruff.lint]
+# B008 flags `typer.Option(...)` defaults, which is how Typer declares options.
+ignore = ["B008"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

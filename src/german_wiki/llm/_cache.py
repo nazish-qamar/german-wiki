@@ -188,7 +188,12 @@ def write(key: str, payload: dict[str, Any], *, cache_dir: Path | str | None = N
     except OSError as exc:
         logger.warning("cache write failed for %s: %s", key, exc)
     finally:
-        tmp.unlink(missing_ok=True)
+        # A blocked shard makes POSIX raise NotADirectoryError here, which missing_ok
+        # does not cover (Windows raises FileNotFoundError, which it does).
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _discard(path: Path) -> None:

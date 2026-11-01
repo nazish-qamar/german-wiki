@@ -154,6 +154,22 @@ def test_write_failure_warns_but_does_not_raise(tmp_cache: Path) -> None:
     assert any("cache write failed" in r.getMessage() for r in records)
 
 
+def test_write_failure_survives_a_posix_style_cleanup_error(
+    tmp_cache: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On macOS/Linux the temp-file cleanup under a blocked shard raises NotADirectoryError."""
+    key = _cache.cache_key(MODEL, TEXT)
+    shard = _cache.entry_path(MODEL, key, cache_dir=tmp_cache).parent
+    shard.parent.mkdir(parents=True)
+    shard.write_text("blocking file", encoding="utf-8")
+
+    def unlink(self: Path, missing_ok: bool = False) -> None:
+        raise NotADirectoryError(20, "Not a directory", str(self))
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    _cache.write(MODEL, key, VECTOR, cache_dir=tmp_cache)  # must not raise
+
+
 # --- stats and clear ---
 
 
