@@ -3,6 +3,9 @@
 A personal German-learning wiki that builds itself from what you're studying, but only
 with your approval.
 
+Inspired by Andrej Karpathy's LLM Wiki pattern, with one deliberate change: here the LLM
+proposes, but nothing reaches the wiki without human review.
+
 Give it a text file, a photo of a textbook page, or a PDF. A language model pulls out
 the learnable concepts (grammar rules, word families, fixed phrases). Each one is checked
 against what the wiki already knows. You then decide whether it becomes a new note,
@@ -23,6 +26,28 @@ diff. Once notes exist, you can:
   instead of duplicating them, so your review history is kept.
 
 It runs on one machine. It's a CLI with no server, no account and no web UI.
+
+## Engineering highlights
+
+- **1,190+ tests** (pytest). Tests that call real model APIs or load the local embedding
+  model are opt-in, so the default run is offline and free.
+- **An architecture decision log.** [`docs/decisions.md`](docs/decisions.md) has 16 ADRs,
+  each recording what was decided, the alternatives, and why. One example: why Anki note
+  GUIDs come from node identity, so a re-export keeps your review history.
+- **Cost-aware model routing.** Every pipeline step picks its own provider and model in
+  [`config/models.yaml`](config/models.yaml):
+  - Most steps (extraction, CEFR tiebreak, word-family transparency, OCR) run on free
+    GLM "flash" models.
+  - The one paid model, `glm-4.6`, is used only for adjudication. Flash was used to tune
+    it and got real borderline pairs wrong; the config comment records why.
+  - Most steps fall back to DeepSeek if Z.AI fails, and changing a model is a one-line
+    config edit.
+  - Every call is cached on disk by a hash of the full request (model name included), so
+    re-running on the same input costs nothing, while switching models re-runs cleanly.
+  - Prices are stored only when checked against the provider's own pricing page, with
+    the date. A model without a checked price is reported as "unpriced" instead of
+    getting a guessed cost.
+  - `gw cost` shows tokens and spend per step and in total.
 
 ## Quick start
 
@@ -64,9 +89,8 @@ You can review a proposal by hand before approving it: it's a Markdown file in
 Other commands: `gw list`, `gw grid`, `gw gaps`, `gw families`, `gw anki`, and
 `gw cost` (token usage and spend so far). `gw --help` lists everything.
 
-**Cost:** every model call is cached on disk by a hash of its input, so re-running the
-pipeline on the same input costs nothing. Token counts and estimated cost per call are
-logged, and `gw cost` shows the running total.
+**Cost:** `gw cost --by step` shows what you've spent so far. See
+[Engineering highlights](#engineering-highlights) for how routing and caching keep it low.
 
 ## Example
 
@@ -117,7 +141,8 @@ Things to notice:
   order. Merges are held to the same rule: they may not add information that isn't in
   the sources.
 - **`source_ids` points back to the original text,** which is kept unchanged so any note
-  can be checked against what it came from.
+  can be checked against what it came from. Source texts are kept locally in `raw/`,
+  which is gitignored, so the one for this example isn't in the repo.
 - **`cefr_basis` explains the level.** It's computed from grammar rules and wordlists
   first. The model is only asked when those disagree or have nothing to say
   (`llm:tiebreak`).
