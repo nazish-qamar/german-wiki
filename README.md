@@ -3,7 +3,7 @@
 A personal German-learning wiki that builds itself from what you're studying, but only
 with your approval.
 
-Inspired by Andrej Karpathy's LLM Wiki pattern, with one deliberate change: here the LLM
+Inspired by Andrej Karpathy's LLM Wiki pattern [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f), with one deliberate change: here the LLM
 proposes, but nothing reaches the wiki without human review.
 
 Give it a text file, a photo of a textbook page, or a PDF. A language model pulls out
