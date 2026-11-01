@@ -140,6 +140,23 @@ def test_the_loser_is_archived_never_silently_deleted(world) -> None:
     assert pointer["decision_id"] == result.decision_id
 
 
+def test_the_archive_sidecar_records_a_project_relative_origin(world, monkeypatch) -> None:
+    """/_merged is public in git, so the sidecar must not carry a machine path."""
+    monkeypatch.setattr("german_wiki.config.PROJECT_ROOT", world["nodes"].parent)
+    _apply.apply_merge(_merge_proposal(world), merged_dir=world["merged"], **_apply_kwargs(world))
+
+    sidecar = json.loads((world["merged"] / "perfekt-sein.json").read_text(encoding="utf-8"))
+    assert sidecar["origin_path"] == "german-wiki/queue/src-1/perfekt-sein.md"
+
+
+def test_an_origin_outside_the_project_records_only_its_name(world, monkeypatch) -> None:
+    monkeypatch.setattr("german_wiki.config.PROJECT_ROOT", world["nodes"])  # queue is outside
+    _apply.apply_merge(_merge_proposal(world), merged_dir=world["merged"], **_apply_kwargs(world))
+
+    sidecar = json.loads((world["merged"] / "perfekt-sein.json").read_text(encoding="utf-8"))
+    assert sidecar["origin_path"] == "perfekt-sein.md"
+
+
 def test_archiving_twice_does_not_overwrite_the_first_tombstone(world) -> None:
     world["merged"].mkdir(parents=True)
     (world["merged"] / "perfekt-sein.md").write_text("an older casualty\n", encoding="utf-8")

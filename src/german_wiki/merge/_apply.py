@@ -177,6 +177,20 @@ def _origin_path(proposal: Proposal, node_id: str, nodes_dir: Path | str | None)
     return None
 
 
+def _public_origin(origin: Path) -> str:
+    """``origin`` as it may appear in the git-tracked sidecar: never a machine path.
+
+    ``/_merged`` is committed, and the repo is public, so ``D:\\...`` style paths would
+    leak the local layout. Inside the project this is ``german-wiki/<relative>`` with
+    forward slashes; outside it (an env override pointing elsewhere) only the file name.
+    """
+    try:
+        relative = origin.resolve().relative_to(config.PROJECT_ROOT.resolve())
+    except ValueError:
+        return origin.name
+    return f"german-wiki/{relative.as_posix()}"
+
+
 def archive_loser(
     proposal: Proposal,
     origin: Path,
@@ -212,7 +226,7 @@ def archive_loser(
                 "outcome": proposal.outcome,
                 "decision_id": decision_id,
                 "proposal_id": proposal.id,
-                "origin_path": str(origin),
+                "origin_path": _public_origin(origin),
             },
             ensure_ascii=False,
             indent=2,
